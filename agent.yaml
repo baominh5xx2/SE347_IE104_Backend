@@ -2,80 +2,50 @@
 
 system:
   name: "Tour Booking AI System"
-  version: "2.1.0"
-  description: "LangGraph dual-agent system with MCP integration and tool calling loop"
+  version: "2.0.0"
+  description: "Dual-agent system with MCP integration"
   
 # LLM Configuration (Shared)
 llm:
   provider: "openai"
-  model: "gpt-5-mini"
-  temperature: 1.0
+  model: "gpt-4.1-mini"
+  temperature: 0.7
   max_tokens: 2048
   streaming: true
 
 # Agents Configuration
 agents:
-  # Chat Agent - Main agent handles conversation with tool calling loop
+  # Chat Agent - Main agent handles conversation
   - name: "chat_agent"
     type: "langgraph"
-    description: "Main conversational agent with LangGraph agent pattern and tool calling loop"
+    description: "Main conversational agent"
     config:
       entry_point: "app.v1.services.agent_services.dual_agent_system"
-      temperature: 1.0
+      temperature: 0.7
       
       # Prompt Templates
       prompts:
         system: |
           You are a friendly Vietnamese tour booking assistant.
-          
           Your role is to:
           - Have natural, warm conversations with customers
-          - Help them find and book tour packages
-          - Understand their travel needs through conversation
-          - Collect necessary booking information (destination, number of people, package preference)
-          - Provide tour recommendations when users ask
+          - Understand their travel needs and preferences
+          - Help them find ideal tour packages
+          - Provide accurate information about tours, destinations, and travel
+          - Ask clarifying questions when needed
+          - Be enthusiastic and knowledgeable about Vietnam travel
           
-          CONVERSATION STYLE:
-          - Be friendly, warm, and helpful
-          - Ask questions naturally, one or two at a time
-          - DON'T ask 7 questions at once - it's overwhelming
-          - DON'T mention technical tool names or system internals
-          - DON'T ask users for user_id or technical details
-          - Use tools SILENTLY in the background - user doesn't need to know how you search
+          IMPORTANT: You are NOT a tour recommendation expert. When users ask about tours:
+          1. Ask clarifying questions about their needs (destination, budget, duration, people)
+          2. After understanding their needs, say: "Tôi sẽ tìm kiếm tour phù hợp cho bạn ngay!"
+          3. DO NOT provide specific tour recommendations, packages, or itineraries
+          4. DO NOT mention specific prices, hotels, or tour details
+          5. Keep responses general and let the recommendation system handle the details
           
-          WHEN USERS ASK ABOUT TOURS:
-          - If they mention a destination, automatically search for available tours using your tools
-          - If you need more info (number of people, budget, dates), ask naturally 1-2 questions at a time
-          - After gathering basic info (destination + number of people), automatically search and show recommendations
-          - Don't ask for permission to search - just do it silently
-          
-          WHEN YOU RECEIVE RECOMMENDATION RESULTS:
-          - Recommendation Agent will provide detailed tour information in the conversation
-          - YOU MUST display ALL tours provided - DO NOT summarize or skip any tour
-          - Keep the EXACT same format and ALL information from Recommendation Agent
-          - Display ALL tours with complete details: tour name, destination, duration, price, Package ID, and full description
-          - DO NOT shorten, summarize, or remove any tour from the list
-          - Make it easy to read and compare ALL options
-          - After showing ALL tours, ask if they want to book and what information you need (number of people, dates, etc.)
-          
-          TOOLS (use silently, don't mention to users):
-          - create_booking: Create booking after collecting all required info (phone, package_id, number_of_people)
-          - request_recommendation: Call Recommendation Agent to search for tours
-          
-          CRITICAL - AFTER CREATING BOOKING:
-          - When create_booking tool returns success=True, you MUST STOP immediately
-          - DO NOT call any other tools after booking is successful
-          - Provide booking confirmation to user with booking_id and next steps
-          - This is your final response - do not search for more tours or call any other tools
+          For booking and other requests, use appropriate tools when available.
           
           Always respond in Vietnamese unless user speaks another language.
-          
-          CRITICAL: When showing tour recommendations:
-          - Display ALL tours provided by Recommendation Agent (usually 3-5 tours)
-          - Keep ALL information intact - name, destination, duration, price, Package ID, description
-          - Use clear numbering (1, 2, 3, etc.) to list each tour
-          - DO NOT skip or summarize any tour
-          - Each tour should have complete information visible to the user
+          Keep responses concise, friendly, and helpful.
         
         intent_classification: |
           Analyze the user's message and classify their intent.
@@ -119,65 +89,52 @@ agents:
           Entities: {entities}
           Context: {context}
           
-          GUIDELINES:
-          - If user mentions a destination or wants to book, FIRST show tour recommendations
-          - Automatically search for tours using search_episodes tool when user mentions destinations
-          - Use search_episodes silently - don't tell user you're searching
-          - After searching, present results naturally: "Tôi tìm thấy một số tour phù hợp cho bạn..."
-          - When showing tour recommendations, ALWAYS include the Package ID in format: [Package ID: xxx]
-          - IMPORTANT: You CANNOT create a booking until tour recommendations have been shown first
-          - When user wants to book, FIRST ensure recommendations are shown, THEN collect booking info (phone, number of people)
-          - When booking, USE THE EXACT package_id from the recommendation results shown earlier
-          - NEVER make up or guess package_id - it must come from the recommendations
-          - NEVER call create_booking tool before showing tour recommendations
-          - Ask follow-up questions naturally, one at a time
-          - Don't mention tool names or technical details
+           IMPORTANT: When you need to get user's information or history, use search_episodes:
+          - query_text: Search query (e.g., "Đà Nẵng", "budget", "destination")
+          - user_id: ALWAYS extract from context when available (this gets ALL user data)
+          - limit: Use 10 as default for user history
           
-          Respond naturally in Vietnamese. Be warm, helpful, and concise (2-3 sentences max).
+          Example: search_episodes(query_text="Đà Nẵng", user_id="user_123", limit=10)
+          
+          You have access to MCP tools. If you need to use them, mention that you'll help with the specific request.
+          For example:
+          - "Tôi sẽ tìm kiếm tour phù hợp cho bạn"
+          - "Tôi sẽ kiểm tra thông tin chi tiết tour này"
+          - "Tôi sẽ kiểm tra thời tiết tại điểm đến"
+          - "Tôi sẽ tìm kiếm chuyến bay cho bạn"
+          
+          Respond naturally in Vietnamese. Be warm and helpful.
       
-      # Graph nodes (following LangGraph agent pattern)
-      # Note: Graph is built in dual_agent_system.py using LangGraph StateGraph
-      # Flow: chat_llm → (tool_calls? → chat_tools → chat_llm) → check_recommendation → (recommendation_agent if needed)
       nodes:
-        - name: "chat_llm"
-          description: "LLM decides whether to call tools or respond"
+        - name: "understand_intent"
+          description: "Classify user intent"
           enabled: true
-        - name: "chat_tools"
-          description: "Execute tool calls"
+        - name: "extract_entities"
+          description: "Extract booking entities"
           enabled: true
-        - name: "check_recommendation"
-          description: "Check if recommendation agent is needed"
+        - name: "generate_response"
+          description: "Generate friendly response"
           enabled: true
       
-      # Graph edges managed by dual_agent_system.py with conditional routing
-      # chat_llm → conditional → chat_tools (if tool_calls) or check_recommendation (if no tool_calls)
-      # chat_tools → chat_llm (loop back)
-      # check_recommendation → conditional → recommendation_agent (if needed) or END
+      edges:
+        - from: "understand_intent"
+          to: "extract_entities"
+        - from: "extract_entities"
+          to: "generate_response"
     
     capabilities:
-      - tool_calling
+      - intent_classification
+      - entity_extraction
       - conversational_ai
       - episode_search
-      - booking_management
-      - context_awareness
-      - mcp_integration
     
-    # Available tools (LangGraph agent pattern)
-    tools:
-      create_booking:
-        description: "Create booking after collecting: user phone, package_id from recommendations, and number of people. CRITICAL REQUIREMENTS: 1) You MUST wait for tour recommendations to be shown first - NEVER call this tool before recommendations are displayed. 2) package_id MUST be the exact UUID from the recommendation results (format: [Package ID: xxx]). 3) NEVER make up or guess package_id - it must match exactly what was shown in recommendations. 4) If no recommendations have been shown yet, wait for them first."
-        parameters:
-          user_phone: "string (required) - User phone number"
-          package_id: "string (required) - EXACT Tour package ID UUID from recommendation results (format: xxx-xxx-xxx-xxx). Must be the package_id shown in [Package ID: xxx] from recommendations. Example: '6f32f471-3fdb-4928-9264-62cf83c4fa46'"
-          number_of_people: "integer (required) - Number of people"
-          special_requests: "string (optional) - Special requests"
-        usage: "ONLY call this tool AFTER: 1) Tour recommendations have been shown to the user with [Package ID: xxx] format, 2) You have collected ALL required info (phone, package_id from recommendations, number_of_people). NEVER call this tool before recommendations are shown. If recommendations are not yet available, first use search_episodes or wait for recommendation_agent to provide options."
-      
+    # Function calling guidelines
+    functions:
       search_episodes:
-        description: "Search for tour packages and information. Use silently when user mentions destinations or asks about tours."
+        description: "Search using Graphiti - user_id as focal node gets ALL user's related data"
         parameters:
-          query_text: "string (REQUIRED) - Search query (e.g., 'Đà Lạt', 'tour Nha Trang')"
-          user_id: "string (optional) - Extract from context automatically, don't ask user"
+          query_text: "string (PRIMARY) - Search query (e.g., 'Đà Nẵng', 'budget', 'destination')"
+          user_id: "string (optional) - User ID for personalization"
           limit: "integer (optional) - Number of results, default 5"
         usage_examples:
           user_search: |
@@ -204,7 +161,7 @@ agents:
     description: "Recommends tour packages based on user requirements"
     config:
       entry_point: "app.v1.services.agent_services.recommendation_agent"
-      temperature: 1.0
+      temperature: 0.3
       
       # Prompt Templates
       prompts:
@@ -228,6 +185,14 @@ agents:
           
           Found packages:
           {packages}
+          
+          IMPORTANT: Before generating reasoning, get user's full history to understand preferences:
+          Use search_similar_episodes with:
+          - user_id: ALWAYS extract from context (focal node for ALL user data)
+          - query_text: Use "" to get all data, or specific query to filter
+          - limit: 10 (to get comprehensive history)
+          
+          Example: search_similar_episodes(user_id="user_123", query_text="", limit=10)
           
           Explain in Vietnamese:
           1. Why these packages are suitable for the user
@@ -290,58 +255,36 @@ agents:
 
 # Workflow Configuration
 workflow:
-  type: "langgraph_agent"
-  pattern: "agent_with_tool_calling_loop"
+  type: "conditional"
   max_iterations: 10
   timeout: 300
   
   # Entry point - using dual_agent_system as main orchestrator
   entry_point: "dual_agent_system"
   
-  # Graph flow (following LangGraph agent pattern):
-  # 1. START → chat_llm (LLM decides tool or respond)
-  # 2. chat_llm → conditional:
-  #    - If tool_calls: chat_tools → chat_llm (loop back for more tool calls or final response)
-  #    - If no tool_calls: check_recommendation
-  # 3. check_recommendation → conditional:
-  #    - If needs recommendation: recommendation_agent → END
-  #    - If no recommendation: END
-  
-  # Key features:
-  # - Tool calling loop: LLM can call tools multiple times before responding
-  # - Conditional routing: System automatically routes based on context
-  # - MessagesState: Proper message handling with LangGraph
-  # - MCP integration: Tools connected to MCP server
+  # Note: Routing is now handled internally by dual_agent_system.py
+  # The dual_agent_system manages the flow between chat_agent and recommendation_agent
 
 # MCP Configuration
-# NOTE: MCP server URL is now configured via .env file (MCP_SERVER_URL)
-# This allows environment-specific configuration (dev, staging, prod)
-# 
-# To configure MCP server:
-# 1. Add to .env file:
-#    MCP_SERVER_URL=http://localhost:8001
-#    MCP_TIMEOUT=30
-#
-# 2. agent.yaml values below are used as fallback/defaults only
 mcp:
   enabled: true
-  server_url: "http://localhost:8001"  # Default, overridden by .env MCP_SERVER_URL
-  timeout: 30  # Default, overridden by .env MCP_TIMEOUT
+  server_url: "https://seminar-se-ie-mcp-4.onrender.com/mcp"
+  timeout: 30
   retry: 2
   fallback: "direct_query"
   
-  # Available MCP tools (connected via MCP server)
+  # Available MCP tools
   tools:
     - name: "create_booking"
       endpoint: "/tools/create_booking"
       method: "POST"
-      description: "Create a new tour booking"
+      description: "Create a tour booking"
       parameters:
-        - user_phone: "string (required) - User phone number"
-        - package_id: "string (required) - Tour package ID"
-        - number_of_people: "integer (required) - Number of people"
-        - special_requests: "string (optional) - Special requests"
-      usage: "Called when user wants to book a tour - MUST gather all required info first!"
+        - package_id: "string (required)"
+        - contact_name: "string (required)"
+        - contact_phone: "string (required)"
+        - num_people: "integer (required)"
+        - special_requests: "string (optional)"
 
 # Memory Configuration
 memory:
@@ -360,64 +303,33 @@ database:
     - payments
     - chat_history
   
-# Tool Calling Guidelines (LangGraph Agent Pattern)
-tool_calling:
-  pattern: "agent_with_tool_calling_loop"
-  description: |
-    The system uses LangGraph agent pattern where LLM decides when to use tools.
-    Tool calling happens in a loop: LLM → Tools → LLM (until no more tool calls needed).
-  
-  # Tool calling behavior
-  behavior:
-    - "LLM automatically decides when to use tools based on user request"
-    - "Tools are executed automatically when LLM makes tool calls"
-    - "LLM receives tool results and can call more tools or respond to user"
-    - "Loop continues until LLM provides final response (no more tool calls)"
-  
-  # Available tools
-  available_tools:
-    create_booking:
-      when_to_use: "When user wants to book a tour"
-      required_params: ["user_phone", "package_id", "number_of_people", "travel_date"]
-      optional_params: ["special_requests"]
-      important: "MUST gather all required information before calling!"
-    
-    search_episodes:
-      when_to_use: "When searching user history or general information"
-      required_params: ["query_text"]
-      optional_params: ["user_id", "limit"]
-      note: "Uses Graphiti hybrid search - user_id enables personalization"
-  
-  # Search episodes guidelines (Graphiti with focal node)
-  search_episodes_rules:
+# Function Calling Guidelines
+function_calling:
+  # General guidelines for Graphiti search with focal node
+  search_rules:
     - "ALWAYS extract user_id from context when available"
     - "user_id acts as FOCAL NODE to get ALL user's related data"
-    - "Use specific query_text to filter results"
-    - "Use limit to control number of results (default: 5)"
+    - "Use empty query '' with focal node to get ALL user data"
+    - "Use specific query with focal node to filter user's data"
     - "Call search BEFORE making recommendations for personalization"
   
-  # Search parameter mapping
+  # Parameter mapping for search with focal node
   search_parameter_sources:
-    user_id: "state.user_id (extracted from conversation context)"
-    query_text: "User query or search term (REQUIRED)"
-    limit: "5 (default) or 10 (for user history)"
+    user_id: "context.user_id (REQUIRED for personalization)"
+    query_text: "'' for all data, or specific filter query"
+    limit: "10 (default for user history)"
   
-  # Search query examples
+  # Search query patterns
   search_examples:
-    user_history_search: |
+    user_search: |
       search_episodes(query_text="Đà Nẵng", user_id="user_123", limit=5)
-      # Searches user's episodes related to "Đà Nẵng"
     general_search: |
       search_episodes(query_text="du lịch miền Trung", limit=5)
-      # General semantic search without user context
     budget_search: |
       search_episodes(query_text="budget price", user_id="user_123", limit=10)
-      # Searches user's budget-related episodes
 
 # Capabilities
 capabilities:
-  - langgraph_agent_pattern
-  - tool_calling_loop
   - conversational_ai
   - tour_search
   - tour_recommendation
@@ -425,5 +337,3 @@ capabilities:
   - context_awareness
   - multi_agent_collaboration
   - episode_search
-  - mcp_integration
-  - conditional_routing

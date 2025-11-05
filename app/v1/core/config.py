@@ -2,7 +2,8 @@
 Application Configuration
 """
 from pydantic_settings import BaseSettings
-from typing import List
+from pydantic import field_validator
+from typing import List, Union
 
 
 class Settings(BaseSettings):
@@ -15,12 +16,11 @@ class Settings(BaseSettings):
     
     # OpenAI Configuration
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-5-mini"
-    OPENAI_ORGANIZATION: str = ""  # Optional: OpenAI organization ID for organization-level API access
+    OPENAI_MODEL: str = "gpt-5-nano"
     
     # Graphiti OpenAI Configuration
-    GRAPHITI_SMALL_MODEL: str = "gpt-5-mini"  # For fast operations
-    GRAPHITI_MAIN_MODEL: str = "gpt-5-mini"  # For main operations
+    GRAPHITI_SMALL_MODEL: str = "gpt-5-nano"  # For fast operations
+    GRAPHITI_MAIN_MODEL: str = "gpt-5-nano"  # For main operations
     GRAPHITI_EMBEDDING_MODEL: str = "text-embedding-3-large"  # Embedding model
     
     # Database Configuration
@@ -30,13 +30,25 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
     
+    # JWT Configuration
+    JWT_SECRET: str = "00ade9d6-5869-4ceb-a981-18797afcabd7"
+    JWT_EXPIRE: int = 1  # Days
+    
     # Redis Configuration
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     
     # CORS Configuration
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000"]
+    
+    @field_validator('CORS_ORIGINS', mode='before')
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """Parse CORS_ORIGINS from comma-separated string or list"""
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(',')]
+        return v
     
     # Agent Configuration
     MAX_ITERATIONS: int = 10
@@ -51,24 +63,17 @@ class Settings(BaseSettings):
     FALKORDB_SSL: bool = False
     
     # MCP Server Configuration
-    # Note: MCP server runs on port 8001 by default (separate from Backend API on port 8000)
-    MCP_SERVER_URL: str = "http://localhost:8001"
+    MCP_SERVER_URL: str = "http://localhost:3000"
     MCP_TIMEOUT: int = 30
-    MCP_RETRY_COUNT: int = 3  # Number of retry attempts
-    MCP_RETRY_BACKOFF: float = 2.0  # Exponential backoff multiplier
     
     # Logging Configuration
     LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR
     LANGCHAIN_VERBOSE: bool = True  # Enable verbose logging for LangChain
     LANGCHAIN_TRACING: bool = False  # Enable LangSmith tracing
-    LANGCHAIN_API_KEY: str = ""  # LangSmith API key (optional)
-    LANGCHAIN_PROJECT: str = "ai-assistant-backend"  # LangSmith project name
-    LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"  # LangSmith API endpoint
     
     class Config:
         env_file = ".env"
         case_sensitive = True
-        extra = "ignore"  # Ignore extra fields from .env that are not in Settings
 
 
 settings = Settings()
