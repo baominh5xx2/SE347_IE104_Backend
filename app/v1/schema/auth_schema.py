@@ -1,20 +1,15 @@
 """
 Authentication Schemas
 """
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
 
 
 class RegisterRequest(BaseModel):
     """Register request schema"""
-    full_name: str = Field(..., min_length=2, max_length=100, description="Full name of the user")
-    email: EmailStr = Field(..., description="Email address")
-    password: str = Field(..., min_length=6, description="Password (minimum 6 characters)")
-    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number")
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "full_name": "Nguyen Van A",
                 "email": "a.nguyen@example.com",
@@ -22,32 +17,40 @@ class RegisterRequest(BaseModel):
                 "phone_number": "0123456789"
             }
         }
+    )
+    
+    full_name: str = Field(..., min_length=2, max_length=100, description="Full name of the user")
+    email: EmailStr = Field(..., description="Email address")
+    password: str = Field(..., min_length=6, description="Password (minimum 6 characters)")
+    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number")
 
 
 class LoginRequest(BaseModel):
     """Login request schema"""
-    email: EmailStr = Field(..., description="Email address")
-    password: str = Field(..., description="Password")
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "email": "a.nguyen@example.com",
                 "password": "password123"
             }
         }
+    )
+    
+    email: EmailStr = Field(..., description="Email address")
+    password: str = Field(..., description="Password")
 
 
 class VerifyTokenRequest(BaseModel):
     """Verify token request schema"""
-    token: str = Field(..., description="JWT access token")
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
             }
         }
+    )
+    
+    token: str = Field(..., description="JWT access token")
 
 
 class UserResponse(BaseModel):
@@ -65,13 +68,8 @@ class UserResponse(BaseModel):
 
 class LoginResponse(BaseModel):
     """Login response schema"""
-    EC: int = Field(..., description="Error code (0 = success)")
-    EM: str = Field(..., description="Error message")
-    access_token: Optional[str] = None
-    user: Optional[dict] = None
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "EC": 0,
                 "EM": "Login successful",
@@ -83,16 +81,18 @@ class LoginResponse(BaseModel):
                 }
             }
         }
+    )
+    
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    access_token: Optional[str] = None
+    user: Optional[dict] = None
 
 
 class RegisterResponse(BaseModel):
     """Register response schema"""
-    EC: int = Field(..., description="Error code (0 = success)")
-    EM: str = Field(..., description="Error message")
-    user: Optional[dict] = None
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "EC": 0,
                 "EM": "User registered successfully",
@@ -103,16 +103,17 @@ class RegisterResponse(BaseModel):
                 }
             }
         }
+    )
+    
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    user: Optional[dict] = None
 
 
 class VerifyTokenResponse(BaseModel):
     """Verify token response schema"""
-    EC: int = Field(..., description="Error code (0 = success)")
-    EM: str = Field(..., description="Error message")
-    data: Optional[dict] = None
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "EC": 0,
                 "EM": "Token is valid",
@@ -123,3 +124,8 @@ class VerifyTokenResponse(BaseModel):
                 }
             }
         }
+    )
+    
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[dict] = None

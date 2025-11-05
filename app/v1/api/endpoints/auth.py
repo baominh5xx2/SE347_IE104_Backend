@@ -146,3 +146,4 @@ async def auth_info():
             "verify-token": "POST /api/v1/auth/verify-token"
         }
     }
+

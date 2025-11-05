@@ -25,7 +25,9 @@ dependencies = [
     "python-json-logger==2.0.7",
     "FalkorDB==1.2.0",
     "graphiti-core==0.22.0",
-    "colorama>=0.4.6"
+    "colorama>=0.4.6",
+    "pydantic[email]",
+    "bcrypt"
 ]
 
 [build-system]

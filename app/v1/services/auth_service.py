@@ -5,7 +5,7 @@ Handles user registration, login, and token verification
 import logging
 import bcrypt
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from supabase import Client
 from ..core.config import settings
@@ -76,7 +76,7 @@ class AuthService:
             "email": user_data["email"],
             "full_name": user_data["full_name"],
             "user_id": user_data["user_id"],
-            "exp": datetime.utcnow() + timedelta(days=self.jwt_expire)
+            "exp": datetime.now(timezone.utc) + timedelta(days=self.jwt_expire)
         }
         
         token = jwt.encode(payload, self.jwt_secret, algorithm="HS256")
@@ -126,8 +126,8 @@ class AuthService:
                 "is_activate": True,
                 "login_type": "TRADITIONAL",
                 "security_2fa_enabled": False,
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             
             result = self.supabase.table('users').insert(user_data).execute()
