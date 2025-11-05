@@ -1,0 +1,74 @@
+"""
+Application Configuration
+"""
+from pydantic_settings import BaseSettings
+from typing import List
+
+
+class Settings(BaseSettings):
+    """Application settings"""
+    
+    # API Configuration
+    API_HOST: str = "0.0.0.0"
+    API_PORT: int = 8000
+    DEBUG: bool = True
+    
+    # OpenAI Configuration
+    OPENAI_API_KEY: str
+    OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_ORGANIZATION: str = ""  # Optional: OpenAI organization ID for organization-level API access
+    
+    # Graphiti OpenAI Configuration
+    GRAPHITI_SMALL_MODEL: str = "gpt-5-mini"  # For fast operations
+    GRAPHITI_MAIN_MODEL: str = "gpt-5-mini"  # For main operations
+    GRAPHITI_EMBEDDING_MODEL: str = "text-embedding-3-large"  # Embedding model
+    
+    # Database Configuration
+    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost:5432/aiassistant"
+    
+    # Supabase Configuration
+    SUPABASE_URL: str
+    SUPABASE_KEY: str
+    
+    # Redis Configuration
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    
+    # CORS Configuration
+    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    
+    # Agent Configuration
+    MAX_ITERATIONS: int = 10
+    TIMEOUT: int = 300
+    
+    # FalkorDB Configuration
+    FALKORDB_HOST: str = ""
+    FALKORDB_PORT: int = 49560
+    FALKORDB_USERNAME: str = ""
+    FALKORDB_PASSWORD: str = ""
+    FALKORDB_DATABASE: str = "db1"
+    FALKORDB_SSL: bool = False
+    
+    # MCP Server Configuration
+    # Note: MCP server runs on port 8001 by default (separate from Backend API on port 8000)
+    MCP_SERVER_URL: str = "http://localhost:8001"
+    MCP_TIMEOUT: int = 30
+    MCP_RETRY_COUNT: int = 3  # Number of retry attempts
+    MCP_RETRY_BACKOFF: float = 2.0  # Exponential backoff multiplier
+    
+    # Logging Configuration
+    LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR
+    LANGCHAIN_VERBOSE: bool = True  # Enable verbose logging for LangChain
+    LANGCHAIN_TRACING: bool = False  # Enable LangSmith tracing
+    LANGCHAIN_API_KEY: str = ""  # LangSmith API key (optional)
+    LANGCHAIN_PROJECT: str = "ai-assistant-backend"  # LangSmith project name
+    LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"  # LangSmith API endpoint
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+        extra = "ignore"  # Ignore extra fields from .env that are not in Settings
+
+
+settings = Settings()
