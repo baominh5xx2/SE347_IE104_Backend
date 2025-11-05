@@ -1,226 +1,133 @@
 """
-Chat Endpoints - Using LangGraph Dual Agent System
+Chat API Endpoints
 """
-from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import StreamingResponse
-from app.v1.schema import ChatRequest, ChatResponse
-from app.v1.services.agent_services import dual_agent_system
-from app.v1.core.supabase import supabase_client
+import logging
+import uuid
+from fastapi import APIRouter, HTTPException
+from typing import Optional
+from ...schema.agent_schema import ChatRequest, ChatResponse, ConversationHistory
+from ...services.agent_services import supervisor_graph
+from ...services.agent_services.memory import conversation_memory
 from datetime import datetime
-import json
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.post("", response_model=ChatResponse, status_code=status.HTTP_200_OK)
-@router.post("/", response_model=ChatResponse, status_code=status.HTTP_200_OK)
+@router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Process a chat message using LangGraph dual-agent system
-    
-    Flow:
-    1. Chat Agent analyzes intent and extracts entities
-    2. If needs recommendation → Recommendation Agent finds tours
-    3. Final response generated
+    Send a chat message and get AI response
     
     Args:
-        request: Chat request with message
+        request: Chat request with message and optional conversation_id
         
     Returns:
-        ChatResponse with agent's response and recommendations
+        ChatResponse with assistant's response
     """
     try:
-        # Get conversation history for this specific conversation
-        history = []
-        try:
-            # If conversation_id is provided, get history for that conversation
-            if request.conversation_id:
-                response = supabase_client.table("chat_history")\
-                    .select("*")\
-                    .eq("conversation_id", request.conversation_id)\
-                    .order("created_at", desc=True)\
-                    .limit(10)\
-                    .execute()
-            else:
-                # For new conversations, get recent history (fallback)
-                response = supabase_client.table("chat_history")\
-                    .select("*")\
-                    .order("created_at", desc=True)\
-                    .limit(10)\
-                    .execute()
-            
-            if response.data:
-                history = [
-                    {"role": msg["role"], "content": msg["content"]}
-                    for msg in reversed(response.data)
-                ]
-        except:
-            pass
-        
-        # Generate unique IDs if not provided
-        import uuid
+        # Generate conversation_id if not provided
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
-        user_id = request.user_id or f"user_{uuid.uuid4().hex[:12]}"
+        user_id = request.user_id or "anonymous_user"
         
-        # Process through LangGraph dual agent system
-        result = await dual_agent_system.process_message(
+        # Process message through supervisor graph
+        result = await supervisor_graph.process_message(
             user_message=request.message,
-            conversation_history=history,
             conversation_id=conversation_id,
             user_id=user_id
         )
         
-        # Save conversation to database
+        # Extract response
+        response_message = result.get("response", "Xin lỗi, không thể xử lý yêu cầu của bạn.")
+        
+        # Store episode in memory if available
         try:
-            # Save user message
-            supabase_client.table("chat_history").insert({
-                "conversation_id": conversation_id,
-                "user_id": user_id,
-                "role": "user",
-                "content": request.message,
-                "intent": None,
-                "entities": None
-            }).execute()
-            
-            # Save assistant response
-            supabase_client.table("chat_history").insert({
-                "conversation_id": conversation_id,
-                "user_id": user_id,
-                "role": "assistant",
-                "content": result["response"],
-                "intent": None,
-                "entities": None
-            }).execute()
+            await conversation_memory.store_episode(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                user_message=request.message,
+                assistant_response=response_message,
+                metadata=result.get("metadata", {})
+            )
         except Exception as e:
-            print(f"Warning: Could not save to database: {e}")
+            logger.warning(f"Failed to store episode: {str(e)}")
         
         return ChatResponse(
             conversation_id=conversation_id,
-            message=result["response"],
+            message=response_message,
             metadata={
-                "user_id": user_id
+                "recommendations": result.get("recommendations", []),
+                **result.get("metadata", {})
             },
             timestamp=datetime.now()
         )
         
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing chat message: {str(e)}"
-        )
+        logger.error(f"Error in chat endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/stream", include_in_schema=True)
-@router.post("/stream/", include_in_schema=False)
-async def chat_stream(request: ChatRequest):
+@router.get("/conversation/{conversation_id}", response_model=ConversationHistory)
+async def get_conversation(conversation_id: str):
     """
-    Stream chat response token by token using LangGraph
+    Get conversation history by conversation_id
     
     Args:
-        request: Chat request with message
+        conversation_id: Conversation ID
         
     Returns:
-        StreamingResponse with tokens
-    """
-    async def generate():
-        try:
-            # Get conversation history for this specific conversation
-            history = []
-            try:
-                # If conversation_id is provided, get history for that conversation
-                if request.conversation_id:
-                    response = supabase_client.table("chat_history")\
-                        .select("*")\
-                        .eq("conversation_id", request.conversation_id)\
-                        .order("created_at", desc=True)\
-                        .limit(10)\
-                        .execute()
-                else:
-                    # For new conversations, get recent history (fallback)
-                    response = supabase_client.table("chat_history")\
-                        .select("*")\
-                        .order("created_at", desc=True)\
-                        .limit(10)\
-                        .execute()
-                
-                if response.data:
-                    history = [
-                        {"role": msg["role"], "content": msg["content"]}
-                        for msg in reversed(response.data)
-                    ]
-            except:
-                pass
-            
-            # Generate unique IDs if not provided
-            import uuid
-            conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
-            user_id = request.user_id or f"user_{uuid.uuid4().hex[:12]}"
-            
-            # Stream through agents
-            async for event in dual_agent_system.stream_message(
-                user_message=request.message,
-                conversation_history=history,
-                conversation_id=conversation_id,
-                user_id=user_id
-            ):
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
-    
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream"
-    )
-
-
-@router.get("/history", include_in_schema=True)
-@router.get("/history/", include_in_schema=False)
-async def get_conversation_history(conversation_id: str = None, limit: int = 20):
-    """
-    Get conversation history
-    
-    Args:
-        conversation_id: Optional conversation ID to filter by
-        limit: Number of recent messages to retrieve
-        
-    Returns:
-        List of conversation messages
+        ConversationHistory with messages
     """
     try:
-        query = supabase_client.table("chat_history").select("*")
+        # Get memory for this conversation
+        memory = conversation_memory.get_memory(conversation_id)
         
-        # Filter by conversation_id if provided
-        if conversation_id:
-            query = query.eq("conversation_id", conversation_id)
+        # Convert messages to schema format
+        messages = []
+        for msg in memory.messages:
+            from ...schema.agent_schema import Message, MessageRole
+            role = MessageRole.USER if msg.type == "human" else MessageRole.ASSISTANT
+            messages.append(Message(
+                role=role,
+                content=msg.content,
+                timestamp=datetime.now()
+            ))
         
-        response = query.order("created_at", desc=True).limit(limit).execute()
+        return ConversationHistory(
+            conversation_id=conversation_id,
+            messages=messages,
+            created_at=datetime.now(),
+            updated_at=datetime.now()
+        )
         
-        if response.data:
-            history = [
-                {
-                    "message_id": msg["message_id"],
-                    "conversation_id": msg["conversation_id"],
-                    "user_id": msg["user_id"],
-                    "role": msg["role"],
-                    "content": msg["content"],
-                    "intent": msg["intent"],
-                    "entities": msg["entities"],
-                    "created_at": msg.get("created_at")
-                }
-                for msg in reversed(response.data)
-            ]
-        else:
-            history = []
+    except Exception as e:
+        logger.error(f"Error getting conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/conversation/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """
+    Delete a conversation and its history
+    
+    Args:
+        conversation_id: Conversation ID to delete
+        
+    Returns:
+        Success message
+    """
+    try:
+        # Delete from memory storage
+        if conversation_id in conversation_memory.memory_storage:
+            del conversation_memory.memory_storage[conversation_id]
         
         return {
-            "conversation_id": conversation_id,
-            "messages": history,
-            "total": len(history)
+            "message": f"Conversation {conversation_id} deleted successfully",
+            "conversation_id": conversation_id
         }
         
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving conversation history: {str(e)}"
-        )
+        logger.error(f"Error deleting conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+

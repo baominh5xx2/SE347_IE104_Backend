@@ -11,19 +11,12 @@ from app.v1.core.config import settings
 from app.v1.api.router import api_router
 
 # Initialize logging FIRST before any other imports
-from app.v1.core.logging_config import setup_logging, get_agent_callback
-# Setup logging and store callback
-agent_callback = setup_logging(
+from app.v1.core.logging_config import setup_logging
+setup_logging(
     level=settings.LOG_LEVEL,
     enable_langchain_tracing=settings.LANGCHAIN_TRACING,
-    enable_callback=settings.LANGCHAIN_VERBOSE,
-    langchain_api_key=settings.LANGCHAIN_API_KEY,
-    langchain_project=settings.LANGCHAIN_PROJECT,
-    langsmith_endpoint=settings.LANGSMITH_ENDPOINT
+    enable_callback=settings.LANGCHAIN_VERBOSE
 )
-# Update module-level agent_callback for imports
-import app.v1.core.logging_config as logging_module
-logging_module.agent_callback = agent_callback or get_agent_callback()
 
 
 @asynccontextmanager
@@ -70,45 +63,6 @@ async def lifespan(app: FastAPI):
         print(f"❌ FalkorDB connection failed: {str(e)}")
         print("🔧 Please check your FALKORDB_* settings in .env file")
         # Don't exit, just warn - app can still run without FalkorDB
-    
-    # Test MCP server connection
-    try:
-        import httpx
-        print("🔍 Testing MCP server connection...")
-        
-        # Test connection synchronously using httpx (simpler for lifespan)
-        try:
-            # Create a simple sync client for testing
-            test_client = httpx.Client(
-                base_url=settings.MCP_SERVER_URL,
-                timeout=5.0
-            )
-            response = test_client.get("/health")
-            test_client.close()
-            
-            if response.status_code == 200:
-                print("✅ MCP server connection successful!")
-                print(f"🔗 Connected to: {settings.MCP_SERVER_URL}")
-            else:
-                print(f"⚠️ MCP server responded with status {response.status_code}")
-                print(f"🔧 Please check if MCP server is running on: {settings.MCP_SERVER_URL}")
-        except httpx.ConnectError:
-            print(f"❌ MCP server connection failed: Cannot connect to {settings.MCP_SERVER_URL}")
-            print("🔧 Please check:")
-            print(f"   1. MCP_SERVER_URL in .env file (current: {settings.MCP_SERVER_URL})")
-            print("   2. MCP server is running")
-            print("   3. Network connectivity")
-        except httpx.TimeoutException:
-            print(f"❌ MCP server connection timeout: {settings.MCP_SERVER_URL}")
-            print("🔧 MCP server may be slow or unreachable")
-        except Exception as e:
-            print(f"❌ MCP server connection test failed: {str(e)}")
-            print(f"🔧 Please check your MCP_SERVER_URL in .env file (current: {settings.MCP_SERVER_URL})")
-        
-    except Exception as e:
-        print(f"❌ MCP connection test failed: {str(e)}")
-        print(f"🔧 Please check your MCP_SERVER_URL in .env file (current: {settings.MCP_SERVER_URL})")
-        # Don't exit, just warn - app can still run without MCP
     
     yield
     # Shutdown
