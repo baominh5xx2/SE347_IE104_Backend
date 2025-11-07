@@ -27,7 +27,15 @@ dependencies = [
     "graphiti-core==0.22.0",
     "colorama>=0.4.6",
     "pydantic[email]",
-    "bcrypt"
+    "bcrypt",
+    "uvicorn",
+    "pyjwt>=2.8.0",
+    "google-auth>=2.23.0",
+    "google-auth-oauthlib>=1.1.0",
+    "google-auth-httplib2>=0.1.1",
+    "httpx",
+    "requests>=2.32.5",
+    "requests"
 ]
 
 [build-system]

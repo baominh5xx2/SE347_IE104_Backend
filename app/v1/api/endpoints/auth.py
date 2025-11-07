@@ -2,7 +2,8 @@
 Authentication API Endpoints
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from fastapi.responses import RedirectResponse
 from typing import Optional
 from ...schema.auth_schema import (
     RegisterRequest,
@@ -10,9 +11,13 @@ from ...schema.auth_schema import (
     VerifyTokenRequest,
     RegisterResponse,
     LoginResponse,
-    VerifyTokenResponse
+    VerifyTokenResponse,
+    GoogleLoginRequest,
+    GoogleCallbackRequest,
+    GoogleAuthURLResponse
 )
 from ...services.auth_service import AuthService
+from ...services.google_oauth_service import GoogleOAuthService
 from ...core.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -24,6 +29,12 @@ def get_auth_service():
     """Dependency to get AuthService instance"""
     supabase = get_supabase_client()
     return AuthService(supabase)
+
+
+def get_google_oauth_service():
+    """Dependency to get GoogleOAuthService instance"""
+    supabase = get_supabase_client()
+    return GoogleOAuthService(supabase)
 
 
 @router.post("/register", response_model=RegisterResponse)
@@ -143,7 +154,142 @@ async def auth_info():
         "endpoints": {
             "register": "POST /api/v1/auth/register",
             "login": "POST /api/v1/auth/login",
-            "verify-token": "POST /api/v1/auth/verify-token"
+            "verify-token": "POST /api/v1/auth/verify-token",
+            "google-auth-url": "GET /api/v1/auth/google/auth-url",
+            "google-login": "POST /api/v1/auth/google/login",
+            "google-callback": "GET /api/v1/auth/google/callback"
         }
     }
+
+
+@router.get("/google/auth-url", response_model=GoogleAuthURLResponse)
+async def get_google_auth_url(
+    google_service: GoogleOAuthService = Depends(get_google_oauth_service)
+):
+    """
+    Get Google OAuth authorization URL
+    
+    This endpoint generates a URL that redirects users to Google's consent page.
+    Users can use this URL to authenticate with their Google account.
+    
+    Returns:
+        GoogleAuthURLResponse with authorization URL
+    """
+    try:
+        auth_url = google_service.get_google_auth_url()
+        return GoogleAuthURLResponse(
+            EC=0,
+            EM="Google OAuth URL generated",
+            auth_url=auth_url
+        )
+    except Exception as e:
+        logger.error(f"Error generating Google auth URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/google/login", response_model=LoginResponse)
+async def google_login(
+    request: GoogleLoginRequest,
+    google_service: GoogleOAuthService = Depends(get_google_oauth_service)
+):
+    """
+    Login with Google ID token
+    
+    This endpoint accepts a Google ID token from the client and authenticates the user.
+    If the user doesn't exist, a new account is automatically created.
+    
+    Args:
+        request: Google login request with ID token
+        google_service: Google OAuth service instance
+        
+    Returns:
+        LoginResponse with access token and user data
+        
+    Example:
+        ```json
+        {
+            "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjU5N..."
+        }
+        ```
+    """
+    try:
+        result = await google_service.google_login(request.id_token)
+        return LoginResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error in Google login endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+async def _handle_google_callback_logic(
+    code: Optional[str],
+    state: Optional[str],
+    error: Optional[str],
+    format: Optional[str],
+    google_service: GoogleOAuthService
+):
+    """Shared logic for Google OAuth callback"""
+    try:
+        if error:
+            logger.error(f"Google OAuth error: {error}")
+            if format == "json":
+                return {"EC": 1, "EM": f"Google OAuth error: {error}", "access_token": None, "user": None}
+            return RedirectResponse(url=f"http://localhost:3000/login?error={error}", status_code=303)
+        
+        if not code:
+            if format == "json":
+                return {"EC": 1, "EM": "No authorization code provided", "access_token": None, "user": None}
+            return RedirectResponse(url="http://localhost:3000/login?error=no_code", status_code=303)
+        
+        # Handle callback and get login result
+        result = await google_service.handle_google_callback(code, state)
+        
+        # Return JSON format for testing
+        if format == "json":
+            return result
+        
+        # Default: Redirect to frontend
+        if result["EC"] == 0:
+            # Success - redirect to frontend with token
+            token = result.get("access_token")
+            return RedirectResponse(url=f"http://localhost:3000/auth/callback?token={token}", status_code=303)
+        else:
+            # Error - redirect with error message
+            error_msg = result.get("EM", "Login failed")
+            return RedirectResponse(url=f"http://localhost:3000/login?error={error_msg}", status_code=303)
+            
+    except Exception as e:
+        logger.error(f"Error in Google callback endpoint: {str(e)}")
+        return RedirectResponse(url=f"http://localhost:3000/login?error={str(e)}", status_code=303)
+
+
+@router.get("/google/callback")
+async def google_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    format: Optional[str] = Query("json", description="Response format: 'json' (default) or 'redirect'"),
+    google_service: GoogleOAuthService = Depends(get_google_oauth_service)
+):
+    """
+    Handle Google OAuth callback
+    
+    This endpoint handles the callback from Google after user authorization.
+    It exchanges the authorization code for tokens and logs the user in.
+    
+    Args:
+        code: Authorization code from Google
+        state: State parameter for CSRF protection (optional)
+        error: Error message if authorization failed
+        format: Response format - 'redirect' (default) or 'json'
+        google_service: Google OAuth service instance
+        
+    Returns:
+        Redirect to frontend with token or error (default)
+        OR JSON response if format=json
+    """
+    return await _handle_google_callback_logic(code, state, error, format, google_service)
+
 
