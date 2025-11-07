@@ -37,10 +37,6 @@ class PromptManager:
         
         return prompts
     
-    def get_mcp_config(self) -> Dict[str, Any]:
-        """Get MCP configuration from agent.yaml"""
-        return self.config.get('mcp', {})
-    
     def get_prompt(self, agent_name: str, prompt_name: str, **kwargs) -> str:
         """
         Get a prompt template and format it with variables

@@ -543,4 +543,3 @@ def search_episodes_tool() -> StructuredTool:
         description="Search through conversation history and user interactions stored in the knowledge graph to find relevant episodes. Use this to find past conversations or user preferences related to the query.",
         args_schema=SearchEpisodesInput
     )
-

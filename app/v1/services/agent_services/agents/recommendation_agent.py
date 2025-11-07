@@ -249,4 +249,3 @@ class RecommendationAgent(BaseAgent):
 
 # Singleton instance
 recommendation_agent = RecommendationAgent()
-

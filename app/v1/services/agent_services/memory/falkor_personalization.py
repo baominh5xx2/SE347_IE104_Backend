@@ -286,4 +286,3 @@ Assistant: {assistant_response}"""
 
 # Singleton instance
 falkor_personalization_service = FalkorPersonalizationService()
-

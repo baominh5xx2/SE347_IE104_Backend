@@ -78,4 +78,3 @@ class BaseAgent(ABC):
     def get_llm(self) -> ChatOpenAI:
         """Get LLM instance"""
         return self.llm
-

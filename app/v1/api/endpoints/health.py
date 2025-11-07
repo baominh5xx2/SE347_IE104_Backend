@@ -73,24 +73,7 @@ async def health_check():
             "error": str(e)
         }
     
-    # Check Agent System
-    try:
-        from ...services.agent_services import supervisor_graph
-        if supervisor_graph and supervisor_graph.graph:
-            health_status["components"]["agent_system"] = {
-                "status": "healthy",
-                "initialized": True
-            }
-        else:
-            health_status["components"]["agent_system"] = {
-                "status": "unhealthy",
-                "initialized": False
-            }
-    except Exception as e:
-        health_status["components"]["agent_system"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
+    # Agent System has been removed - skip check
     
     # Overall status
     all_healthy = all(
@@ -114,14 +97,12 @@ async def readiness_check():
     """
     try:
         # Check if critical components are available
-        from ...services.agent_services import supervisor_graph
         from ...core.supabase import get_supabase_client
         
         # Basic checks
-        has_agent = supervisor_graph is not None
         has_supabase = get_supabase_client() is not None
         
-        if has_agent:
+        if has_supabase:
             return {
                 "ready": True,
                 "status": "ready"
@@ -130,7 +111,7 @@ async def readiness_check():
             return {
                 "ready": False,
                 "status": "not ready",
-                "reason": "Agent system not initialized"
+                "reason": "Supabase not initialized"
             }
     except Exception as e:
         logger.error(f"Readiness check failed: {str(e)}")

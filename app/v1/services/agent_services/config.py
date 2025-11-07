@@ -36,4 +36,3 @@ class AgentConfig(BaseModel):
 
 # Global config instance
 agent_config = AgentConfig()
-

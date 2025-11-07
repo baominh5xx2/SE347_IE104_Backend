@@ -20,4 +20,3 @@ __all__ = [
     "DualAgentSystem",
     "dual_agent_system"
 ]
-

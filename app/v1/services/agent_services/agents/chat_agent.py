@@ -57,4 +57,3 @@ class ChatAgent(BaseAgent):
         # This will be handled by graph nodes
         # Chat Agent logic is in nodes/chat/
         return state
-
