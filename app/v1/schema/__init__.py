@@ -1,5 +1,4 @@
 """Schema package initialization"""
-# Agent schema has been removed - only auth schema remains
 from .auth_schema import (
     RegisterRequest,
     LoginRequest,
@@ -11,6 +10,15 @@ from .auth_schema import (
     GoogleCallbackRequest,
     GoogleAuthURLResponse
 )
+from .agent_schema import (
+    ChatRequest,
+    ChatResponse,
+    Message,
+    MessageRole,
+    AgentState,
+    ConversationHistory,
+    AgentStatus
+)
 
 __all__ = [
     "RegisterRequest",
@@ -21,5 +29,12 @@ __all__ = [
     "VerifyTokenResponse",
     "GoogleLoginRequest",
     "GoogleCallbackRequest",
-    "GoogleAuthURLResponse"
+    "GoogleAuthURLResponse",
+    "ChatRequest",
+    "ChatResponse",
+    "Message",
+    "MessageRole",
+    "AgentState",
+    "ConversationHistory",
+    "AgentStatus"
 ]
