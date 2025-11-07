@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     # MCP Server Configuration
     MCP_SERVER_URL: str = "http://localhost:3000"
     MCP_TIMEOUT: int = 30
+    MCP_RETRY_COUNT: int = 3  # Number of retry attempts
+    MCP_RETRY_BACKOFF: float = 2.0  # Exponential backoff multiplier
     
     # Logging Configuration
     LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR

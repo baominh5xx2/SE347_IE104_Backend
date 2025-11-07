@@ -14,7 +14,7 @@ class AgentConfig(BaseModel):
     # LLM Configuration
     model: str = settings.OPENAI_MODEL
     api_key: str = settings.OPENAI_API_KEY
-    organization: str = settings.OPENAI_ORGANIZATION  # Optional OpenAI organization ID
+    organization: str = ""  # Optional OpenAI organization ID
     temperature: float = 0.7
     
     # Agent Configuration

@@ -180,6 +180,11 @@ def get_agent_callback() -> AgentCallbackHandler:
     return AgentCallbackHandler()
 
 
+def get_current_agent_callback() -> AgentCallbackHandler:
+    """Get current agent callback handler (alias for get_agent_callback)"""
+    return get_agent_callback()
+
+
 # Initialize logging on import
 agent_callback = setup_logging(
     level="INFO",
