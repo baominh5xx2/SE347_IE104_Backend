@@ -16,11 +16,13 @@ class Settings(BaseSettings):
     
     # OpenAI Configuration
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-5-nano"
+    OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_ORGANIZATION: str = ""  # Optional: OpenAI organization ID for organization-level API access
+
     
     # Graphiti OpenAI Configuration
-    GRAPHITI_SMALL_MODEL: str = "gpt-5-nano"  # For fast operations
-    GRAPHITI_MAIN_MODEL: str = "gpt-5-nano"  # For main operations
+    GRAPHITI_SMALL_MODEL: str = "gpt-5-mini"  # For fast operations
+    GRAPHITI_MAIN_MODEL: str = "gpt-5-mini"  # For main operations
     GRAPHITI_EMBEDDING_MODEL: str = "text-embedding-3-large"  # Embedding model
     
     # Database Configuration
@@ -68,7 +70,7 @@ class Settings(BaseSettings):
     FALKORDB_SSL: bool = False
     
     # MCP Server Configuration
-    MCP_SERVER_URL: str = "http://localhost:3000"
+    MCP_SERVER_URL: str = "http://localhost:8001"
     MCP_TIMEOUT: int = 30
     MCP_RETRY_COUNT: int = 3  # Number of retry attempts
     MCP_RETRY_BACKOFF: float = 2.0  # Exponential backoff multiplier
@@ -77,6 +79,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR
     LANGCHAIN_VERBOSE: bool = True  # Enable verbose logging for LangChain
     LANGCHAIN_TRACING: bool = False  # Enable LangSmith tracing
+    LANGCHAIN_API_KEY: str = ""  # LangSmith API key (optional)
+    LANGCHAIN_PROJECT: str = "ai-assistant-backend"  # LangSmith project name
+    LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"  # LangSmith API endpoint
     
     class Config:
         env_file = ".env"
