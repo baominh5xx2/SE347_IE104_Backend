@@ -129,3 +129,47 @@ class VerifyTokenResponse(BaseModel):
     EC: int = Field(..., description="Error code (0 = success)")
     EM: str = Field(..., description="Error message")
     data: Optional[dict] = None
+
+
+class GoogleLoginRequest(BaseModel):
+    """Google login request schema"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjU5N..."
+            }
+        }
+    )
+    
+    id_token: str = Field(..., description="Google ID token from client")
+
+
+class GoogleCallbackRequest(BaseModel):
+    """Google OAuth callback request schema"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "code": "4/0Ab32j93vxbLfYR2xt4xJ7Fnsh8qgR4LuBtcQW74QR6RbTPtePKEASmNiKHhrWjzkALB5tQ"
+            }
+        }
+    )
+    
+    code: str = Field(..., description="Authorization code from Google OAuth callback")
+
+
+class GoogleAuthURLResponse(BaseModel):
+    """Google OAuth URL response"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "EC": 0,
+                "EM": "Google OAuth URL generated",
+                "auth_url": "https://accounts.google.com/o/oauth2/auth?..."
+            }
+        }
+    )
+    
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    auth_url: Optional[str] = None
+

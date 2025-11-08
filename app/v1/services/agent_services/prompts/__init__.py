@@ -6,4 +6,3 @@ Prompt templates for agents
 # This module can be extended if needed
 
 __all__ = []
-

@@ -220,3 +220,4 @@ class ChatAgentNodes:
         if needs_recommendation:
             return "recommendation_agent"
         return "chat_llm"
+

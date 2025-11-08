@@ -1,3 +1,4 @@
+
 """
 Simple Graph Data Schema for User Interactions
 Using Graphiti's automatic entity extraction - no custom schema needed

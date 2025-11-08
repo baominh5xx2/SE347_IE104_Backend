@@ -139,4 +139,3 @@ async def readiness_check():
             "status": "not ready",
             "error": str(e)
         }
-

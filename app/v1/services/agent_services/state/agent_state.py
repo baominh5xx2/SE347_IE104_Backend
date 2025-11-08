@@ -29,4 +29,3 @@ class AgentState(MessagesState):
     
     # Final output
     final_response: str
-

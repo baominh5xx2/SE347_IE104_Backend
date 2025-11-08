@@ -34,6 +34,5 @@ __all__ = [
     # Legacy compatibility
     "dual_agent_system",
     "DualAgentSystem",
-    "recommendation_agent",
-    "RecommendationAgent",
 ]
+

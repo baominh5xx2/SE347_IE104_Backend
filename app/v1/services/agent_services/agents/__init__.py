@@ -12,4 +12,3 @@ __all__ = [
     "RecommendationAgent",
     "recommendation_agent"
 ]
-

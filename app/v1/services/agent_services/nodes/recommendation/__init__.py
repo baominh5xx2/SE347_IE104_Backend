@@ -119,4 +119,3 @@ Sau khi hiển thị đầy đủ, hỏi user:
             current_messages = state.get("messages", [])
             state["messages"] = current_messages + [error_ai_msg]
             return state
-

@@ -80,4 +80,3 @@ class PromptManager:
 
 # Singleton instance
 prompt_manager = PromptManager()
-

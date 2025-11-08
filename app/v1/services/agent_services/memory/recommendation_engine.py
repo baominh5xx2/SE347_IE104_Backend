@@ -201,4 +201,3 @@ class RecommendationEngine:
 
 # Singleton instance
 recommendation_engine = RecommendationEngine()
-

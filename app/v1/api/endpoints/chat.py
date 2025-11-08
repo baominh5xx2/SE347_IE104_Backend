@@ -130,4 +130,3 @@ async def delete_conversation(conversation_id: str):
     except Exception as e:
         logger.error(f"Error deleting conversation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
