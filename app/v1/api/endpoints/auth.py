@@ -291,5 +291,3 @@ async def google_callback(
         OR JSON response if format=json
     """
     return await _handle_google_callback_logic(code, state, error, format, google_service)
-
-
