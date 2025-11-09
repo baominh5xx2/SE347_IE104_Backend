@@ -26,6 +26,7 @@ class AgentState(MessagesState):
     
     # Shared data
     recommended_package_ids: List[str]
+    tour_packages: List[Dict[str, Any]]  # Full tour package objects for API response
     
     # Final output
     final_response: str

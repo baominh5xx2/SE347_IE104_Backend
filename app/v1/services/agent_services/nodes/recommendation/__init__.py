@@ -63,15 +63,29 @@ class RecommendationAgentNodes:
                 if package_ids:
                     state["recommended_package_ids"] = package_ids
                 
+                # Store full tour packages in state for API response
+                state["tour_packages"] = packages[:5]
+                
                 # Build detailed message with tour info (show top 5 tours)
                 tour_details = []
                 for i, pkg in enumerate(packages[:5], 1):
                     # Get full description or truncate if too long
-                    description = pkg.get('description', 'N/A')        
+                    description = pkg.get('description', 'N/A')
+                    # Get start_date and end_date from package (these are FIXED dates, not user choice)
+                    start_date = pkg.get('start_date', 'N/A')
+                    end_date = pkg.get('end_date', 'N/A')
+                    
+                    # Format dates if available
+                    date_info = ""
+                    if start_date != 'N/A' and end_date != 'N/A':
+                        date_info = f"\n   - Ngày bắt đầu: {start_date}\n   - Ngày kết thúc: {end_date}"
+                    elif start_date != 'N/A':
+                        date_info = f"\n   - Ngày bắt đầu: {start_date}"
+                    
                     tour_info = f"""
 {i}. {pkg.get('package_name', 'N/A')}
    - Địa điểm: {pkg.get('destination', 'N/A')}
-   - Thời gian: {pkg.get('duration_days', 'N/A')} ngày
+   - Thời gian: {pkg.get('duration_days', 'N/A')} ngày{date_info}
    - Giá: {pkg.get('price', 0):,.0f} VND
    - Package ID: {pkg.get('package_id', 'N/A')}
    - Mô tả: {description}
@@ -90,11 +104,17 @@ Lý do đề xuất: {reasoning}
 
 QUAN TRỌNG: Vui lòng hiển thị TẤT CẢ {num_shown} tour ở trên cho user, đừng tóm tắt hay bỏ qua tour nào.
 
+CRITICAL - VỀ NGÀY KHỞI HÀNH:
+- Mỗi tour package đã có NGÀY BẮT ĐẦU và NGÀY KẾT THÚC CỐ ĐỊNH (đã hiển thị ở trên)
+- KHÔNG hỏi user về "ngày dự kiến khởi hành" - ngày đã được quy định sẵn trong package
+- Ngày bắt đầu và ngày kết thúc lấy từ thông tin package (start_date, end_date), KHÔNG phải user chọn
+
 Sau khi hiển thị đầy đủ, hỏi user:
 - Bạn có muốn đặt tour nào không?
 - Số người đi
-- Ngày khởi hành dự kiến
-- Package ID bạn muốn đặt (từ danh sách trên)"""
+- Package ID bạn muốn đặt (từ danh sách trên)
+
+KHÔNG hỏi về ngày khởi hành - ngày đã được quy định trong package."""
             else:
                 recommendation_message = reasoning if reasoning else "Không tìm thấy tour phù hợp với yêu cầu của bạn."
             

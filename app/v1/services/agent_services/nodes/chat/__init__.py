@@ -38,38 +38,88 @@ class ChatAgentNodes:
         """
         LLM node: LLM decides whether to call a tool or respond
         
-        Following LangGraph agent pattern:
-        https://docs.langchain.com/oss/python/langgraph/workflows-agents
+        Uses Mem0 for semantic memory search instead of buffer memory
         """
         try:
             conversation_id = state.get("conversation_id", "default_conv")
+            user_id = state.get("user_id", "anonymous_user")
             
-            # Get conversation-specific memory
-            memory = conversation_memory.get_memory(conversation_id)
+            # Get current user message for context search
+            current_messages = state.get("messages", [])
+            user_query = ""
+            if current_messages:
+                last_msg = current_messages[-1]
+                if hasattr(last_msg, 'content'):
+                    user_query = last_msg.content
             
-            # Prepare messages with system prompt from agent.yaml
-            # Reads from: agents[name='chat_agent'].config.prompts.system
+            # Search Mem0 for relevant context instead of loading all messages
+            relevant_memories = []
+            if user_query:
+                relevant_memories = await conversation_memory.search_context(
+                    query=user_query,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    limit=5
+                )
+            
+            # Prepare system prompt
             system_prompt = prompt_manager.get_system_prompt('chat_agent')
             
-            # Add context about recommended package_ids if available
+            # Add Mem0 context if available
+            if relevant_memories:
+                context_str = "\n\nRELEVANT CONTEXT FROM MEMORY:\n"
+                for idx, mem in enumerate(relevant_memories, 1):
+                    memory_content = mem.get("memory", "") or mem.get("content", "")
+                    context_str += f"{idx}. {memory_content}\n"
+                system_prompt += context_str
+            
+            # Add context about recommended tours if available
             recommended_package_ids = state.get("recommended_package_ids", [])
-            if recommended_package_ids:
+            tour_packages = state.get("tour_packages", [])
+            
+            if tour_packages:
+                # Build detailed context about available tours
+                tours_context = "\n\n⚠️ CRITICAL CONTEXT - YOU ALREADY HAVE TOUR RECOMMENDATIONS:\n"
+                tours_context += "You have already shown these tours to the user. User is likely SELECTING from this list, NOT requesting new tours.\n\n"
+                tours_context += "Available tours (user may refer to them by number):\n"
+                for idx, pkg in enumerate(tour_packages, start=1):
+                    pkg_name = pkg.get("package_name", "Unknown Tour")
+                    pkg_id = pkg.get("package_id", "N/A")
+                    destination = pkg.get("destination", "N/A")
+                    price = pkg.get("price", 0)
+                    duration = pkg.get("duration_days", 0)
+                    tours_context += f"{idx}. {pkg_name} (ID: {pkg_id}) - {destination}, {duration} days, {price:,} VND\n"
+                tours_context += f"\n⚠️ DO NOT call request_recommendation if:\n"
+                tours_context += "- User mentions this destination (e.g., '{tour_packages[0].get('destination', 'Đà Lạt')}') - they're selecting, not requesting\n"
+                tours_context += "- User provides number of people or phone - they're booking, not searching\n"
+                tours_context += "- User says 'tour đà lạt đi' or similar - they're choosing from your list\n"
+                tours_context += f"- User refers to tours by number ('tour 1', 'tour số 2') - use package_id from above\n\n"
+                tours_context += "ONLY call request_recommendation if user EXPLICITLY asks for NEW/DIFFERENT tours.\n\n"
+                
+                # Add date information context
+                tours_context += "📅 CRITICAL - ABOUT DATES:\n"
+                tours_context += "- Each tour package has FIXED start_date and end_date (already shown in tour details)\n"
+                tours_context += "- Dates are NOT user choice - they are predetermined in the package\n"
+                tours_context += "- DO NOT ask user for 'ngày dự kiến khởi hành' or 'ngày đi'\n"
+                tours_context += "- When displaying tours, always show start_date and end_date from package data\n"
+                tours_context += "- For booking, you only need: phone, package_id, and number_of_people\n"
+                
+                system_prompt += tours_context
+            elif recommended_package_ids:
+                # Fallback: only have IDs
                 package_ids_context = f"\n\nIMPORTANT CONTEXT: Available package IDs from recent recommendations: {', '.join(recommended_package_ids)}. When creating booking, use one of these exact package IDs."
                 system_prompt += package_ids_context
             
-            # Combine memory messages with current state messages
+            # Build messages for LLM
             messages = [SystemMessage(content=system_prompt)]
-            messages.extend(list(memory.messages))
             
             # Add current state messages
-            current_messages = state.get("messages", [])
             if current_messages:
                 for msg in current_messages:
                     if not isinstance(msg, SystemMessage):
                         messages.append(msg)
             
-            # Get LLM response with tools bound (with callback handler for logging)
-            # Chat Agent will process the recommendation message and create a natural response
+            # Get LLM response with tools bound
             llm_with_tools = self.llm.bind_tools(self.tools)
             agent_callback = get_current_agent_callback()
             response = await llm_with_tools.ainvoke(

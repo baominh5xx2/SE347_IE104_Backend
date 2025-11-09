@@ -134,7 +134,7 @@ agents:
           - Ask follow-up questions naturally, one at a time
           - Don't mention tool names or technical details
           
-          Respond naturally in Vietnamese. Be warm, helpful, and concise (2-3 sentences max).
+          Respond naturally in Vietnamese. Be warm, helpful.
       
       # Graph nodes (following LangGraph agent pattern)
       # Note: Graph is built in dual_agent_system.py using LangGraph StateGraph
