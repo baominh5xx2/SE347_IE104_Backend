@@ -218,6 +218,73 @@ class SupervisorGraph:
                 "error": str(e)
             }
 
+    async def process_message_stream(
+        self,
+        user_message: str,
+        conversation_history: list = None,
+        conversation_id: str = "default_conv",
+        user_id: str = "anonymous_user"
+    ):
+        """
+        Process user message through multi-agent system with streaming
+        
+        Args:
+            user_message: User's input
+            conversation_history: Previous messages
+            conversation_id: Conversation ID for tracking
+            user_id: User ID for personalization
+            
+        Yields:
+            Stream events from LangGraph execution
+        """
+        # Initialize state
+        initial_state = AgentState(
+            messages=[HumanMessage(content=user_message)],
+            conversation_id=conversation_id,
+            user_id=user_id,
+            chat_response="",
+            needs_recommendation=False,
+            recommendation_params={},
+            recommended_package_ids=[],
+            final_response=""
+        )
+        
+        # Add conversation history if provided
+        if conversation_history:
+            history_messages = []
+            for msg in conversation_history:
+                if isinstance(msg, dict):
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    if role == "user":
+                        history_messages.append(HumanMessage(content=content))
+                    elif role == "assistant":
+                        history_messages.append(HumanMessage(content=content))
+            
+            if history_messages:
+                initial_state["messages"] = history_messages + initial_state["messages"]
+        
+        # Stream graph execution
+        config = {
+            "configurable": {
+                "thread_id": conversation_id,
+                "max_iterations": agent_config.max_iterations
+            }
+        }
+        
+        try:
+            async for event in self.graph.astream_events(initial_state, config, version="v2"):
+                yield event
+                
+        except Exception as e:
+            logger.error(f"❌ Error streaming message: {str(e)}")
+            yield {
+                "event": "error",
+                "data": {
+                    "error": str(e)
+                }
+            }
+
 
 # Singleton instance
 supervisor_graph = SupervisorGraph()
