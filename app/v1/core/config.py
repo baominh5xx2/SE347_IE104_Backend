@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # JWT Configuration
     JWT_SECRET: str
     JWT_EXPIRE: int = 7  # Token expiration in days
+    # Token encryption (Fernet URL-safe base64 key). If empty, tokens stored plaintext (not recommended).
+    TOKEN_ENCRYPTION_KEY: str = ""
     
     # Google OAuth Configuration
     GOOGLE_CLIENT_ID: str = ""

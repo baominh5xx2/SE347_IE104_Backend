@@ -9,11 +9,18 @@ from google.oauth2 import id_token
 from google.auth.transport import requests
 from google_auth_oauthlib.flow import Flow
 from supabase import Client
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from ..core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Optional Fernet import for encrypting refresh tokens
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+except Exception:
+    Fernet = None  # type: ignore
+    InvalidToken = Exception  # type: ignore
 
 
 class GoogleOAuthService:
@@ -30,6 +37,15 @@ class GoogleOAuthService:
         self.client_id = settings.GOOGLE_CLIENT_ID
         self.client_secret = settings.GOOGLE_CLIENT_SECRET
         self.redirect_uri = settings.GOOGLE_REDIRECT_URI
+        # Prepare Fernet if encryption key provided
+        self._fernet = None
+        enc_key = getattr(settings, 'TOKEN_ENCRYPTION_KEY', '')
+        if enc_key and Fernet is not None:
+            try:
+                # Expecting URL-safe base64-encoded key
+                self._fernet = Fernet(enc_key.encode('utf-8'))
+            except Exception:
+                logger.warning("Invalid TOKEN_ENCRYPTION_KEY provided; refresh tokens will be stored plaintext")
         
     def get_google_auth_url(self) -> str:
         """
@@ -251,6 +267,99 @@ class GoogleOAuthService:
                 "EC": 5,
                 "EM": f"Google login error: {str(e)}"
             }
+
+    def _encrypt(self, plaintext: str) -> str:
+        """Encrypt plaintext using Fernet if available, otherwise return plaintext."""
+        if not plaintext:
+            return plaintext
+        if self._fernet is None:
+            return plaintext
+        try:
+            token = self._fernet.encrypt(plaintext.encode('utf-8'))
+            return token.decode('utf-8')
+        except Exception as e:
+            logger.error(f"Failed to encrypt token: {str(e)}")
+            return plaintext
+
+    def _decrypt(self, token_text: str) -> str:
+        """Decrypt token_text using Fernet if available, otherwise return token_text."""
+        if not token_text:
+            return token_text
+        if self._fernet is None:
+            return token_text
+        try:
+            data = self._fernet.decrypt(token_text.encode('utf-8'))
+            return data.decode('utf-8')
+        except InvalidToken:
+            logger.error("Invalid encryption token when trying to decrypt refresh token")
+            return token_text
+        except Exception as e:
+            logger.error(f"Failed to decrypt token: {str(e)}")
+            return token_text
+
+    async def refresh_access_token(self, user_id: str) -> Dict[str, Any]:
+        """Refresh access token using stored refresh_token for given user_id.
+
+        Returns a dict with EC/EM and optionally new access_token and expires_at.
+        """
+        try:
+            # Read stored credentials
+            res = self.supabase.table('google_drive_credentials').select('*').eq('user_id', user_id).execute()
+            if not res.data:
+                return {"EC": 1, "EM": "No google_drive_credentials for user"}
+
+            creds = res.data[0]
+            stored_refresh = creds.get('refresh_token')
+            if not stored_refresh:
+                return {"EC": 2, "EM": "No refresh_token available"}
+
+            refresh_token = self._decrypt(stored_refresh)
+
+            token_url = "https://oauth2.googleapis.com/token"
+            data = {
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token"
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(token_url, data=data)
+
+            if response.status_code != 200:
+                logger.error(f"Refresh token failed: {response.text}")
+                return {"EC": 3, "EM": f"Refresh failed: {response.text}"}
+
+            token_data = response.json()
+            access_token = token_data.get('access_token')
+            expires_in = token_data.get('expires_in')
+            scope = token_data.get('scope')
+
+            expires_at = None
+            if expires_in:
+                try:
+                    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))).isoformat()
+                except Exception:
+                    expires_at = None
+
+            update = {"updated_at": datetime.now(timezone.utc).isoformat()}
+            if access_token:
+                update['access_token'] = access_token
+            if expires_at:
+                update['expires_at'] = expires_at
+            if scope:
+                update['scope'] = scope
+
+            try:
+                self.supabase.table('google_drive_credentials').update(update).eq('user_id', user_id).execute()
+            except Exception as e:
+                logger.error(f"Failed to update google_drive_credentials after refresh: {str(e)}")
+
+            return {"EC": 0, "EM": "Refreshed", "access_token": access_token, "expires_at": expires_at}
+
+        except Exception as e:
+            logger.error(f"Error refreshing access token: {str(e)}")
+            return {"EC": 4, "EM": f"Error: {str(e)}"}
     
     async def handle_google_callback(self, code: str, state: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -285,31 +394,86 @@ class GoogleOAuthService:
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(token_url, data=data)
-                
+
                 if response.status_code != 200:
                     logger.error(f"Token exchange failed: {response.text}")
                     return {
                         "EC": 6,
                         "EM": f"Failed to exchange code for token: {response.text}"
                     }
-                
+
                 token_data = response.json()
                 id_token_str = token_data.get("id_token")
-                
+
                 if not id_token_str:
                     logger.error("No id_token in response")
                     return {
                         "EC": 6,
                         "EM": "No ID token received from Google"
                     }
-                
+
                 logger.info("Successfully exchanged code for token")
-                
-                # Login with ID token
-                return await self.google_login(id_token_str)
-            
-            # Login with ID token
-            return await self.google_login(id_token_str)
+
+                # Login / create user with ID token
+                login_result = await self.google_login(id_token_str)
+
+                # If login succeeded, persist Google Drive OAuth2 credentials
+                try:
+                    if login_result.get("EC") == 0 and login_result.get("user"):
+                        user = login_result["user"]
+                        user_id = user.get("user_id")
+
+                        # Extract token details (note: refresh_token is only returned on first consent)
+                        refresh_token = token_data.get("refresh_token")
+                        access_token = token_data.get("access_token")
+                        expires_in = token_data.get("expires_in")
+                        scope = token_data.get("scope")
+
+                        expires_at = None
+                        if expires_in:
+                            try:
+                                expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))).isoformat()
+                            except Exception:
+                                expires_at = None
+
+                        now_iso = datetime.now(timezone.utc).isoformat()
+
+                        creds_data = {
+                            "user_id": user_id,
+                            "scope": scope or "",
+                            "updated_at": now_iso
+                        }
+
+                        if refresh_token:
+                            creds_data["refresh_token"] = self._encrypt(refresh_token)
+                        if access_token:
+                            creds_data["access_token"] = access_token
+                        if expires_at:
+                            creds_data["expires_at"] = expires_at
+
+                        # Upsert logic: update if exists, otherwise insert
+                        try:
+                            existing = self.supabase.table('google_drive_credentials') \
+                                .select('*') \
+                                .eq('user_id', user_id) \
+                                .execute()
+
+                            if existing.data:
+                                self.supabase.table('google_drive_credentials').update(creds_data).eq('user_id', user_id).execute()
+                            else:
+                                creds_data["created_at"] = now_iso
+                                self.supabase.table('google_drive_credentials').insert(creds_data).execute()
+
+                            # mark saved
+                            login_result["ggdrive_saved"] = True
+                        except Exception as e:
+                            logger.error(f"Failed to persist google_drive_credentials: {str(e)}")
+                            login_result["ggdrive_saved"] = False
+
+                except Exception as e:
+                    logger.error(f"Error while saving Google Drive credentials: {str(e)}")
+
+                return login_result
             
         except Exception as e:
             logger.error(f"Error handling Google callback: {str(e)}")
