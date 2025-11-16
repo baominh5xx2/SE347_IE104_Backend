@@ -59,7 +59,7 @@ class RecommendationEngine:
                     relevant_memories = await self.memory.search_context(
                         query=user_message,
                         user_id=user_id,
-                        limit=5
+                        limit=2
                     )
                     
                     if relevant_memories:

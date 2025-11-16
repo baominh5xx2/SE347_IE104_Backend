@@ -122,7 +122,7 @@ class RecommendationAgent(BaseAgent):
                 user_message=query,
                 user_id=user_id,
                 filters=filters,
-                limit=5
+                limit=2
             )
             
             recommendations = result.get("recommendations", [])

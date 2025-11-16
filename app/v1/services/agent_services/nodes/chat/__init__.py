@@ -59,7 +59,7 @@ class ChatAgentNodes:
                     query=user_query,
                     user_id=user_id,
                     conversation_id=conversation_id,
-                    limit=5
+                    limit=2
                 )
             
             # Prepare system prompt

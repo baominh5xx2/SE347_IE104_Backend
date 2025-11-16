@@ -82,12 +82,13 @@ class RecommendationAgentNodes:
                     elif start_date != 'N/A':
                         date_info = f"\n   - Ngày bắt đầu: {start_date}"
                     
+                    # NOTE: Package ID is stored internally in state["tour_packages"] for backend use
+                    # Do NOT include Package ID in user-facing message
                     tour_info = f"""
 {i}. {pkg.get('package_name', 'N/A')}
    - Địa điểm: {pkg.get('destination', 'N/A')}
    - Thời gian: {pkg.get('duration_days', 'N/A')} ngày{date_info}
    - Giá: {pkg.get('price', 0):,.0f} VND
-   - Package ID: {pkg.get('package_id', 'N/A')}
    - Mô tả: {description}
 """
                     tour_details.append(tour_info)
@@ -110,9 +111,11 @@ CRITICAL - VỀ NGÀY KHỞI HÀNH:
 - Ngày bắt đầu và ngày kết thúc lấy từ thông tin package (start_date, end_date), KHÔNG phải user chọn
 
 Sau khi hiển thị đầy đủ, hỏi user:
-- Bạn có muốn đặt tour nào không?
+- Bạn thích tour nào trong số những tour trên? (chỉ cần nói số hoặc tên tour, ví dụ: "tour 1" hoặc "Đà Lạt")
 - Số người đi
-- Package ID bạn muốn đặt (từ danh sách trên)
+- Số điện thoại liên hệ
+- Yeu cầu khác (nếu có)
+- KHÔNG hỏi Package ID - đó là chi tiết kỹ thuật nội bộ
 
 KHÔNG hỏi về ngày khởi hành - ngày đã được quy định trong package."""
             else:

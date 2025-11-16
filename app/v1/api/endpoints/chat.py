@@ -25,7 +25,7 @@ async def chat_stream(request: ChatRequest):
     try:
         # Generate conversation_id if not provided
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
-        user_id = request.user_id or "anonymous_user"
+        user_id = request.user_id or "anonymous_user4"
         
         async def event_generator():
             try:
@@ -40,6 +40,7 @@ async def chat_stream(request: ChatRequest):
                 # Track response for storage
                 full_response = ""
                 recommendations = []
+                tour_packages = []
                 metadata = {}
                 
                 # Stream from LangGraph
@@ -69,14 +70,18 @@ async def chat_stream(request: ChatRequest):
                                 full_response = chain_output.get("final_response", full_response)
                             if "recommended_package_ids" in chain_output:
                                 recommendations = chain_output.get("recommended_package_ids", [])
+                            if "tour_packages" in chain_output:
+                                tour_packages = chain_output.get("tour_packages", [])
                             if "metadata" in chain_output:
                                 metadata = chain_output.get("metadata", {})
                 
-                # Send recommendations if available
-                if recommendations:
+                # Send recommendations (full tour packages) if available
+                if recommendations or tour_packages:
+                    # Use tour_packages if available (has full details), otherwise use IDs
+                    rec_data = tour_packages if tour_packages else recommendations
                     rec_event = {
                         "type": "recommendations",
-                        "data": recommendations
+                        "data": rec_data
                     }
                     yield f"data: {json.dumps(rec_event, ensure_ascii=False)}\n\n"
                 
@@ -137,7 +142,7 @@ async def chat(request: ChatRequest):
     try:
         # Generate conversation_id if not provided
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
-        user_id = request.user_id or "anonymous_user"
+        user_id = request.user_id or "anonymous_user4"
         
         # Process message through supervisor graph
         result = await supervisor_graph.process_message(
