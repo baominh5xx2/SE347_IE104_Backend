@@ -8,6 +8,20 @@ from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 import logging
+import os
+
+# Try to import checkpointer for conversation memory
+try:
+    from langgraph.checkpoint.memory import MemorySaver
+    HAS_MEMORY_SAVER = True
+except ImportError:
+    try:
+        from langgraph.checkpoint import MemorySaver
+        HAS_MEMORY_SAVER = True
+    except ImportError:
+        HAS_MEMORY_SAVER = False
+        logger = logging.getLogger(__name__)
+        logger.warning("⚠️ MemorySaver not available - conversation history won't be persisted")
 
 from app.v1.services.agent_services.state import AgentState
 from app.v1.services.agent_services.nodes import ChatAgentNodes, RecommendationAgentNodes
@@ -32,6 +46,12 @@ class SupervisorGraph:
     Architecture:
     - Chat Agent: Handles conversation with tool calling loop
     - Recommendation Agent: Provides tour recommendations (called by Chat Agent via tool)
+    
+    Memory Management:
+    - Uses LangGraph MemorySaver checkpointer for conversation history persistence
+    - Each conversation_id acts as a thread_id for state management
+    - All messages and context are automatically saved per conversation
+    - Agent remembers full conversation history across requests
     
     Flow:
     1. START → chat_llm (LLM decides to use tools or respond)
@@ -110,7 +130,14 @@ class SupervisorGraph:
         # After recommendation agent, go back to Chat Agent to generate final response
         workflow.add_edge("recommendation_agent", "chat_llm")
         
-        return workflow.compile()
+        # Compile with memory checkpointer for conversation history persistence
+        if HAS_MEMORY_SAVER:
+            memory = MemorySaver()
+            logger.info("✅ Conversation memory (MemorySaver) enabled")
+            return workflow.compile(checkpointer=memory)
+        else:
+            logger.warning("⚠️ Compiling without checkpointer - no conversation history persistence")
+            return workflow.compile()
     
     async def process_message(
         self,
@@ -166,6 +193,9 @@ class SupervisorGraph:
                     "max_iterations": agent_config.max_iterations
                 }
             }
+            
+            # Log memory checkpoint info
+            logger.info(f"📝 Loading conversation state for thread_id: {conversation_id}")
             
             final_state = await self.graph.ainvoke(initial_state, config)
             
@@ -271,6 +301,8 @@ class SupervisorGraph:
                 "max_iterations": agent_config.max_iterations
             }
         }
+        
+        logger.info(f"📝 Streaming conversation for thread_id: {conversation_id}")
         
         try:
             async for event in self.graph.astream_events(initial_state, config, version="v2"):
