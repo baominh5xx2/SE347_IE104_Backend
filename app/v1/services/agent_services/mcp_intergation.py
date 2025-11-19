@@ -12,10 +12,12 @@ Following MCP best practices:
 import httpx
 import logging
 import asyncio
+import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from enum import Enum
 from app.v1.core.config import settings
+from fastmcp import Client
 
 logger = logging.getLogger(__name__)
 
@@ -92,36 +94,24 @@ class MCPIntegrationService:
             retry_count: Number of retry attempts
             retry_backoff: Exponential backoff multiplier
         """
-        # Read from .env via config.py (settings)
-        self.base_url = base_url or settings.MCP_SERVER_URL
-        self.timeout = timeout or settings.MCP_TIMEOUT
+        # Load from agent.yaml
+        from app.v1.core.prompts import PromptManager
+        mcp_config = PromptManager().get_mcp_config()
+        
+        # Priority: args > env > yaml
+        self.base_url = base_url or settings.MCP_SERVER_URL or mcp_config.get('server_url', 'http://localhost:8000/mcp/mcp')
+        self.timeout = timeout or settings.MCP_TIMEOUT or mcp_config.get('timeout', 30)
         self.retry_count = retry_count
         self.retry_backoff = retry_backoff
         
         # Validate configuration
         if not self.base_url:
             raise ValueError("MCP_SERVER_URL must be configured")
-        
-        # Create HTTP client with connection pooling
-        # Use longer keepalive and disable connection reuse cleanup to avoid event loop issues
-        limits = httpx.Limits(
-            max_keepalive_connections=10,
-            max_connections=20,
-            keepalive_expiry=300.0  # Increased to 5 minutes to avoid premature cleanup
-        )
-        
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=httpx.Timeout(self.timeout, connect=5.0),
-            limits=limits,
-            follow_redirects=True,
-            # Don't close connections immediately - let them timeout naturally
-            http2=False  # Use HTTP/1.1 for more predictable behavior
-        )
-        
-        # Log initialization (minimal)
-        logger.debug(f"MCP Integration initialized: {self.base_url}")
     
+    async def close(self):
+        """Close resources"""
+        pass
+
     async def _call_tool(
         self,
         tool_name: str,
@@ -157,228 +147,73 @@ class MCPIntegrationService:
                 tool_name=tool_name
             )
         
-        # Generate request ID for tracking
-        request_id = f"{tool_name}_{datetime.now().timestamp()}"
-        
         # Retry logic with exponential backoff
         last_error = None
         for attempt in range(self.retry_count):
             try:
-                # Make HTTP request
-                start_time = datetime.now()
-                response = await self.client.post(
-                    f"/tools/{tool_name}",
-                    json=params
-                )
-                duration = (datetime.now() - start_time).total_seconds()
-                
-                # Check status code
-                if response.status_code >= 500:
-                    # Server error - retryable
-                    error_msg = f"Server error {response.status_code}"
-                    if retry_on_error and attempt < self.retry_count - 1:
-                        wait_time = self.retry_backoff ** attempt
-                        logger.warning(
-                            f"MCP tool {tool_name} server error, retrying...",
-                            extra={
-                                "tool_name": tool_name,
-                                "request_id": request_id,
-                                "status_code": response.status_code,
-                                "attempt": attempt + 1,
-                                "wait_time": wait_time
-                            }
-                        )
-                        await asyncio.sleep(wait_time)
-                        continue
+                # Use FastMCP Client to handle protocol details (SSE, session, etc.)
+                async with Client(self.base_url) as client:
+                    start_time = datetime.now()
+                    result = await client.call_tool(tool_name, params)
                     
-                    raise MCPError(
-                        error_msg,
-                        error_type=MCPErrorType.HTTP_ERROR,
-                        status_code=response.status_code,
-                        tool_name=tool_name,
-                        details={"response": response.text[:500]}
-                    )
-                
-                response.raise_for_status()
-                
-                # Parse response
-                try:
-                    result = response.json()
-                except Exception as e:
-                    raise MCPError(
-                        f"Invalid JSON response: {str(e)}",
-                        error_type=MCPErrorType.UNKNOWN_ERROR,
-                        tool_name=tool_name,
-                        details={"response_text": response.text[:500]}
-                    )
-                
-                # Log success (minimal - tool output logged by callback handler)
-                logger.debug(f"MCP tool {tool_name} succeeded ({duration:.2f}s)")
-                
-                return result
-                
-            except httpx.TimeoutException as e:
-                last_error = e
-                if retry_on_error and attempt < self.retry_count - 1:
-                    wait_time = self.retry_backoff ** attempt
-                    logger.warning(
-                        f"MCP tool {tool_name} timeout, retrying...",
-                        extra={
-                            "tool_name": tool_name,
-                            "request_id": request_id,
-                            "attempt": attempt + 1,
-                            "wait_time": wait_time,
-                            "timeout": self.timeout
-                        }
-                    )
-                    try:
-                        await asyncio.sleep(wait_time)
-                    except RuntimeError as loop_error:
-                        if "Event loop is closed" in str(loop_error):
-                            # Event loop closed during retry - can't continue
-                            raise MCPError(
-                                f"Event loop closed during retry: {str(e)}",
-                                error_type=MCPErrorType.UNKNOWN_ERROR,
-                                tool_name=tool_name
-                            )
-                        raise
-                    continue
-                
-                raise MCPError(
-                    f"Request timeout after {self.timeout}s",
-                    error_type=MCPErrorType.TIMEOUT,
-                    tool_name=tool_name,
-                    details={"timeout": self.timeout}
-                )
-                
-            except httpx.NetworkError as e:
-                last_error = e
-                # Check if it's an event loop closed error
-                if "Event loop is closed" in str(e):
-                    raise MCPError(
-                        f"Event loop closed during request: {str(e)}",
-                        error_type=MCPErrorType.NETWORK_ERROR,
-                        tool_name=tool_name,
-                        details={"error": str(e)}
-                    )
-                
-                if retry_on_error and attempt < self.retry_count - 1:
-                    wait_time = self.retry_backoff ** attempt
-                    logger.warning(
-                        f"MCP tool {tool_name} network error, retrying...",
-                        extra={
-                            "tool_name": tool_name,
-                            "request_id": request_id,
-                            "attempt": attempt + 1,
-                            "wait_time": wait_time,
-                            "error": str(e)
-                        }
-                    )
-                    try:
-                        await asyncio.sleep(wait_time)
-                    except RuntimeError as loop_error:
-                        if "Event loop is closed" in str(loop_error):
-                            raise MCPError(
-                                f"Event loop closed during retry: {str(e)}",
-                                error_type=MCPErrorType.UNKNOWN_ERROR,
-                                tool_name=tool_name
-                            )
-                        raise
-                    continue
-                
-                raise MCPError(
-                    f"Network error: {str(e)}",
-                    error_type=MCPErrorType.NETWORK_ERROR,
-                    tool_name=tool_name,
-                    details={"error": str(e)}
-                )
-                
-            except httpx.HTTPStatusError as e:
-                # Client errors (4xx) - don't retry
-                if 400 <= e.response.status_code < 500:
-                    raise MCPError(
-                        f"Client error {e.response.status_code}: {e.response.text[:200]}",
-                        error_type=MCPErrorType.HTTP_ERROR,
-                        status_code=e.response.status_code,
-                        tool_name=tool_name,
-                        details={"response": e.response.text[:500]}
-                    )
-                # Server errors (5xx) - retry handled above
-                last_error = e
-                if retry_on_error and attempt < self.retry_count - 1:
-                    wait_time = self.retry_backoff ** attempt
-                    await asyncio.sleep(wait_time)
-                    continue
-                raise MCPError(
-                    f"HTTP error {e.response.status_code}",
-                    error_type=MCPErrorType.HTTP_ERROR,
-                    status_code=e.response.status_code,
-                    tool_name=tool_name
-                )
-                
-            except MCPError:
-                # Re-raise our custom errors
-                raise
-                
-            except RuntimeError as e:
-                # Check if it's an event loop closed error
-                if "Event loop is closed" in str(e):
-                    # Don't retry - event loop is closed, can't continue
-                    raise MCPError(
-                        f"Event loop closed: {str(e)}",
-                        error_type=MCPErrorType.UNKNOWN_ERROR,
-                        tool_name=tool_name,
-                        details={"error_type": type(e).__name__, "error": str(e)}
-                    )
-                # Re-raise other RuntimeErrors
-                last_error = e
-                logger.error(
-                    f"MCP tool {tool_name} runtime error",
-                    extra={
-                        "tool_name": tool_name,
-                        "request_id": request_id,
-                        "error_type": type(e).__name__,
-                        "error": str(e)
-                    },
-                    exc_info=True
-                )
-                
-                if not retry_on_error or attempt >= self.retry_count - 1:
-                    raise MCPError(
-                        f"Runtime error: {str(e)}",
-                        error_type=MCPErrorType.UNKNOWN_ERROR,
-                        tool_name=tool_name,
-                        details={"error_type": type(e).__name__, "error": str(e)}
-                    )
-                
+                    # Handle CallToolResult object from FastMCP
+                    if hasattr(result, 'content'):
+                        content_list = result.content
+                        text_content = ""
+                        for item in content_list:
+                            if hasattr(item, 'text'):
+                                text_content += item.text
+                            elif isinstance(item, dict) and item.get("type") == "text":
+                                text_content += item.get("text", "")
+                        
+                        try:
+                            return json.loads(text_content)
+                        except json.JSONDecodeError:
+                            return {"content": text_content}
+
+                    # Handle string result (try to parse as JSON)
+                    if isinstance(result, str):
+                        try:
+                            return json.loads(result)
+                        except json.JSONDecodeError:
+                            return {"content": result}
+                    
+                    return result
+
             except Exception as e:
                 last_error = e
-                logger.error(
-                    f"MCP tool {tool_name} unexpected error",
-                    extra={
-                        "tool_name": tool_name,
-                        "request_id": request_id,
-                        "error_type": type(e).__name__,
-                        "error": str(e)
-                    },
-                    exc_info=True
-                )
+                error_msg = str(e)
                 
-                if not retry_on_error or attempt >= self.retry_count - 1:
-                    raise MCPError(
-                        f"Unexpected error: {str(e)}",
-                        error_type=MCPErrorType.UNKNOWN_ERROR,
-                        tool_name=tool_name,
-                        details={"error_type": type(e).__name__, "error": str(e)}
+                # Check for specific error types if possible
+                # For now, treat most as retryable unless it's a clear validation error
+                
+                if retry_on_error and attempt < self.retry_count - 1:
+                    wait_time = self.retry_backoff ** attempt
+                    logger.warning(
+                        f"MCP tool {tool_name} error, retrying...",
+                        extra={
+                            "tool_name": tool_name,
+                            "attempt": attempt + 1,
+                            "wait_time": wait_time,
+                            "error": error_msg
+                        }
                     )
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                raise MCPError(
+                    f"MCP Tool call failed: {error_msg}",
+                    error_type=MCPErrorType.UNKNOWN_ERROR,
+                    tool_name=tool_name,
+                    details={"error": error_msg}
+                )
         
-        # If we get here, all retries failed
-        raise MCPError(
-            f"Failed after {self.retry_count} attempts: {str(last_error)}",
-            error_type=MCPErrorType.UNKNOWN_ERROR,
-            tool_name=tool_name,
-            details={"last_error": str(last_error)}
-        )
+        if last_error:
+            raise MCPError(
+                f"MCP Tool call failed after retries: {str(last_error)}",
+                error_type=MCPErrorType.UNKNOWN_ERROR,
+                tool_name=tool_name
+            )
     
     # ============================================================================
     # BOOKING TOOLS
@@ -481,12 +316,7 @@ class MCPIntegrationService:
                 if "packages" in result:
                     return result
                 elif "found" in result:
-                    packages = result.get("packages", [])
-                    if packages:
-                        return result
-                    else:
-                        logger.warning(f"⚠️ Result has 'found'={result.get('found')} but packages array is empty")
-                        return result
+                    return result
                 elif "content" in result:
                     # Result might be wrapped in 'content' key (from FastMCP tuple conversion)
                     content_value = result.get("content")
@@ -858,19 +688,13 @@ class MCPIntegrationService:
         try:
             # Check if client is still open before closing
             if hasattr(self.client, '_transport') and self.client._transport:
-                # Try to close gracefully, but don't fail if event loop is closed
                 try:
                     await self.client.aclose()
-                    logger.info("MCP client closed successfully")
                 except RuntimeError as e:
-                    if "Event loop is closed" in str(e):
-                        # Event loop already closed - just log and continue
-                        logger.debug("Event loop already closed, skipping client cleanup")
-                    else:
+                    if "Event loop is closed" not in str(e):
                         raise
-        except Exception as e:
-            # Don't fail if we can't close - might be during shutdown
-            logger.debug(f"Error closing MCP client (non-critical): {str(e)}")
+        except Exception:
+            pass
     
     async def __aenter__(self):
         """Async context manager entry"""

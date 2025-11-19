@@ -1,10 +1,10 @@
 """
-Simple Logging Configuration for Agent System
-Following LangChain best practices
+Logging Configuration with Colors
 """
 import logging
 import sys
 import os
+import warnings
 from typing import Any, Dict, List
 from datetime import datetime
 from langchain_core.callbacks.base import BaseCallbackHandler
@@ -12,8 +12,23 @@ from langchain_core.outputs import LLMResult
 from langchain_core.agents import AgentAction, AgentFinish
 
 
-class SimpleFormatter(logging.Formatter):
-    """Simple formatter without emojis for Windows compatibility"""
+class ColoredFormatter(logging.Formatter):
+    """Colored log formatter"""
+    
+    COLORS = {
+        'DEBUG': '\033[36m',    # Cyan
+        'INFO': '\033[32m',     # Green
+        'WARNING': '\033[33m',  # Yellow
+        'ERROR': '\033[31m',    # Red
+        'CRITICAL': '\033[35m', # Magenta
+        'RESET': '\033[0m'
+    }
+    
+    def format(self, record):
+        color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
+        record.levelname = f"{color}{record.levelname}{self.COLORS['RESET']}"
+        record.name = f"\033[90m{record.name}{self.COLORS['RESET']}"
+        return super().format(record)
     
     def __init__(self):
         super().__init__(
@@ -98,7 +113,13 @@ class AgentCallbackHandler(BaseCallbackHandler):
     def on_tool_end(self, output: str, **kwargs: Any) -> None:
         """Run when tool ends running."""
         self.logger.info("TOOL END")
-        self.logger.debug(f"Output: {output[:100]}...")
+        try:
+            if isinstance(output, str) and len(output) > 100:
+                self.logger.debug(f"Output: {output[:100]}...")
+            elif output:
+                self.logger.debug(f"Output: {str(output)[:100]}")
+        except:
+            pass
     
     def on_tool_error(self, error: Exception, **kwargs: Any) -> None:
         """Run when tool errors."""
@@ -137,22 +158,31 @@ def setup_logging(
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(getattr(logging, level.upper()))
-    console_handler.setFormatter(SimpleFormatter())
+    console_handler.setFormatter(ColoredFormatter())
     root_logger.addHandler(console_handler)
+    
+    # Suppress warnings
+    warnings.filterwarnings('ignore', category=DeprecationWarning)
+    warnings.filterwarnings('ignore', module='supabase')
+    warnings.filterwarnings('ignore', module='pydantic')
+    warnings.filterwarnings('ignore', module='fastmcp')
+    warnings.filterwarnings('ignore', module='websockets')
+    warnings.filterwarnings('ignore', module='langgraph')
     
     # Configure specific loggers
     loggers_config = {
         'app.v1.services.agent_services': level,
-        'agent.callback': level,
-        'langchain': level,
-        'langgraph': level,
-        'openai': 'WARNING',  # Too verbose
-        'httpx': 'WARNING',   # Too verbose
-        'httpcore': 'WARNING', # Too verbose
-        'graphiti_core': 'WARNING',  # Disable Graphiti verbose logs (embeddings, etc.)
-        'graphiti_core.driver': 'WARNING',  # Disable FalkorDB driver logs
-        'graphiti_core.llm_client': 'WARNING',  # Disable LLM client logs
-        'graphiti_core.embedder': 'WARNING'  # Disable embedder logs
+        'src.mcp_server': 'WARNING',
+        'mcp': 'WARNING',
+        'uvicorn': 'WARNING',
+        'uvicorn.access': 'WARNING',
+        'watchfiles': 'WARNING',
+        'openai': 'WARNING',
+        'httpx': 'WARNING',
+        'httpcore': 'WARNING',
+        'langchain': 'WARNING',
+        'langgraph': 'WARNING',
+        'graphiti_core': 'WARNING'
     }
     
     for logger_name, logger_level in loggers_config.items():
@@ -162,15 +192,11 @@ def setup_logging(
     # Enable LangChain tracing if requested
     if enable_langchain_tracing:
         os.environ['LANGCHAIN_TRACING_V2'] = 'true'
-        # Optionally set API key for LangSmith
-        # os.environ['LANGCHAIN_API_KEY'] = 'your-api-key'
     
     # Create callback handler
     callback_handler = None
     if enable_callback:
         callback_handler = AgentCallbackHandler()
-    
-    logging.info(f"Logging configured (level={level})")
     
     return callback_handler
 

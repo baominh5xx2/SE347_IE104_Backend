@@ -4,6 +4,7 @@ Node functions for Chat Agent graph
 """
 from typing import Literal
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langgraph.graph import END
 import logging
 import json
 from app.v1.core.prompts import prompt_manager
@@ -11,7 +12,6 @@ from app.v1.services.agent_services.state import AgentState
 from app.v1.services.agent_services.memory import conversation_memory
 from app.v1.services.agent_services.tools import get_chat_tools
 from app.v1.core.logging_config import get_current_agent_callback
-from langgraph.graph import END
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ class ChatAgentNodes:
         
         Uses Mem0 for semantic memory search instead of buffer memory
         """
+        logger.info("🤖 [Chat LLM] Processing...")
         try:
             conversation_id = state.get("conversation_id", "default_conv")
             user_id = state.get("user_id", "anonymous_user")
@@ -127,14 +128,19 @@ class ChatAgentNodes:
                 config={"callbacks": [agent_callback]}
             )
             
-            # Store response in state messages
-            state["messages"] = [response]
+            # Log tool calls if any
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                for tool_call in response.tool_calls:
+                    logger.info(f"🔧 [Chat LLM] Calling tool: {tool_call.get('name')}")
             
-            # Extract response content
-            if hasattr(response, 'content'):
+            # Append response to messages (don't replace!)
+            state["messages"].append(response)
+            
+            # Extract response content (only if no tool calls)
+            if hasattr(response, 'content') and response.content:
                 state["chat_response"] = response.content
-                # Update final_response - Chat Agent's response is the final one
                 state["final_response"] = response.content
+            
             return state
             
         except Exception as e:
@@ -167,11 +173,13 @@ class ChatAgentNodes:
                     recommendation_params = tool_call.get("args", {})
                     break
             
-            # Execute all tool calls (tool calls will be logged by callback handler)
+            # Execute all tool calls
+            logger.info(f"⚙️ [Chat Tools] Executing {len(last_message.tool_calls)} tool(s)...")
             tool_results = []
             for tool_call in last_message.tool_calls:
                 tool_name = tool_call["name"]
                 tool_args = tool_call.get("args", {})
+                logger.info(f"  → {tool_name}")
                 
                 # Get tool by name
                 tool = self.tools_by_name.get(tool_name)
@@ -242,7 +250,7 @@ class ChatAgentNodes:
             logger.error(f"CHAT TOOLS: Error: {str(e)}")
             return state
     
-    def should_continue_tool_loop(self, state: AgentState) -> Literal["chat_tools", END]:
+    def should_continue_tool_loop(self, state: AgentState) -> str:
         """
         Decide if we should continue the tool loop or end
         
@@ -259,7 +267,7 @@ class ChatAgentNodes:
         # Otherwise, end (Chat Agent decided no tools needed)
         return END
     
-    def should_recommend(self, state: AgentState) -> Literal["recommendation_agent", "chat_llm"]:
+    def should_recommend(self, state: AgentState) -> str:
         """
         Decide routing after tool execution
         
@@ -268,6 +276,8 @@ class ChatAgentNodes:
         """
         needs_recommendation = state.get("needs_recommendation", False)
         if needs_recommendation:
+            logger.info("🔀 [Supervisor] Routing to Recommendation Agent")
             return "recommendation_agent"
+        logger.info("✅ [Supervisor] Conversation complete")
         return "chat_llm"
 

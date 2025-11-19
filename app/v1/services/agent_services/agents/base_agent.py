@@ -59,8 +59,6 @@ class BaseAgent(ABC):
             llm_kwargs["organization"] = agent_config.organization
         
         self.llm = ChatOpenAI(**llm_kwargs)
-        
-        logger.info(f"✅ {self.name} initialized (model: {self.model}, temp: {self.temperature})")
     
     @abstractmethod
     async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
