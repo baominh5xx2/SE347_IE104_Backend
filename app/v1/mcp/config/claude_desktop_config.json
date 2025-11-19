@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "ai-assistant-mcp": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "F:\\UIT\\SE347\\Seminar\\MCP",
+        "run",
+        "server.py"
+      ],
+      "env": {
+        "BACKEND_API_URL": "http://localhost:8000",
+        "LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}

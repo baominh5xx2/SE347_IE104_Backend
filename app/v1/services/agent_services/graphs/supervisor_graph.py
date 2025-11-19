@@ -88,7 +88,6 @@ class SupervisorGraph:
         self.chat_nodes = ChatAgentNodes(self.llm)
         self.recommendation_nodes = RecommendationAgentNodes()
         self.graph = self._build_graph()
-        logger.info("✅ Supervisor Graph initialized")
     
     def _build_graph(self) -> StateGraph:
         """
@@ -116,14 +115,14 @@ class SupervisorGraph:
                 END: END
             }
         )
-        
-        # After tool execution: check if recommendation was requested
+
+        # Conditional routing after tools execution
         workflow.add_conditional_edges(
             "chat_tools",
             self.chat_nodes.should_recommend,
             {
                 "recommendation_agent": "recommendation_agent",
-                "chat_llm": "chat_llm"  # Loop back if no recommendation needed
+                "chat_llm": "chat_llm"
             }
         )
         
@@ -132,9 +131,9 @@ class SupervisorGraph:
         
         # Compile with memory checkpointer for conversation history persistence
         if HAS_MEMORY_SAVER:
-            memory = MemorySaver()
-            logger.info("✅ Conversation memory (MemorySaver) enabled")
-            return workflow.compile(checkpointer=memory)
+            # Enable conversation memory
+            self.memory = MemorySaver()
+            return workflow.compile(checkpointer=self.memory)
         else:
             logger.warning("⚠️ Compiling without checkpointer - no conversation history persistence")
             return workflow.compile()
@@ -201,31 +200,6 @@ class SupervisorGraph:
             
             # Extract final response
             final_response = final_state.get("final_response", "") or final_state.get("chat_response", "")
-            
-            # Log final response in a nice format
-            try:
-                from colorama import Fore, Style
-                COLORAMA_AVAILABLE = True
-            except ImportError:
-                COLORAMA_AVAILABLE = False
-                class Fore:
-                    CYAN = '\033[96m'
-                    GREEN = '\033[92m'
-                    RESET = '\033[0m'
-                class Style:
-                    BRIGHT = '\033[1m'
-                    RESET_ALL = '\033[0m'
-            
-            if COLORAMA_AVAILABLE:
-                print(f"\n{Fore.CYAN}{Style.BRIGHT}{'='*60}{Style.RESET_ALL}", flush=True)
-                print(f"{Fore.CYAN}{Style.BRIGHT}> Final Response:{Style.RESET_ALL}", flush=True)
-                print(f"{Fore.GREEN}{final_response}{Style.RESET_ALL}", flush=True)
-                print(f"{Fore.CYAN}{Style.BRIGHT}{'='*60}{Style.RESET_ALL}\n", flush=True)
-            else:
-                print(f"\n{'='*60}", flush=True)
-                print(f"> Final Response:", flush=True)
-                print(f"{final_response}", flush=True)
-                print(f"{'='*60}\n", flush=True)
             
             return {
                 "response": final_response,

@@ -17,23 +17,27 @@ class RecommendationAgentNodes:
     
     async def recommendation_node(self, state: AgentState) -> AgentState:
         """
-        Recommendation Agent: Provide tour recommendations
+        Recommendation node: Searches and ranks tour packages
         
-        This is called when Chat Agent requests recommendations via request_recommendation tool.
-        Recommendation Agent communicates results back to Chat Agent.
+        Args:
+            state: Current agent state
+            
+        Returns:
+            Updated state with tour recommendations
         """
-        # Get recommendation params from Chat Agent's tool call
-        recommendation_params = state.get("recommendation_params", {})
-        user_query = recommendation_params.get("user_query", "")
-        
-        # Extract user message from state messages as fallback
-        if not user_query:
-            for msg in state.get("messages", []):
-                if isinstance(msg, HumanMessage):
-                    user_query = msg.content
-                    break
-        
+        logger.info("🎯 [Recommendation] Processing...")
         try:
+            # Get recommendation params from Chat Agent's tool call
+            recommendation_params = state.get("recommendation_params", {})
+            user_query = recommendation_params.get("user_query", "")
+            
+            # Extract user message from state messages as fallback
+            if not user_query:
+                for msg in state.get("messages", []):
+                    if isinstance(msg, HumanMessage):
+                        user_query = msg.content
+                        break
+            
             # Build user requirements from Chat Agent's params
             user_requirements = {}
             if recommendation_params.get("destination"):
