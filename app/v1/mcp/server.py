@@ -4,15 +4,15 @@ Professional FastMCP implementation with modular architecture
 """
 import os
 from fastmcp import FastMCP
-from src.mcp_server.core.config import settings
-from src.mcp_server.tools.weather_tools import register_weather_tools
-from src.mcp_server.tools.flight_tools import register_flight_tools
-from src.mcp_server.tools.booking_tools import register_booking_tools
-from src.mcp_server.tools.search_personalization import register_search_personalization_tools
-from src.mcp_server.tools.tour_search_tools import register_tour_search_tools
-from src.mcp_server.resources import register_all_resources
-from src.mcp_server.prompts import register_all_prompts
-from src.mcp_server.utils import setup_logging
+from src.core.config import settings
+from src.tools.weather_tools import register_weather_tools
+from src.tools.flight_tools import register_flight_tools
+from src.tools.booking_tools import register_booking_tools
+from src.tools.search_personalization import register_search_personalization_tools
+from src.tools.tour_search_tools import register_tour_search_tools
+from src.resources import register_all_resources
+from src.prompts import register_all_prompts
+from src.utils import setup_logging
 
 # Setup logging
 setup_logging(settings.LOG_LEVEL)

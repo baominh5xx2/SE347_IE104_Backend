@@ -12,7 +12,7 @@ import numpy as np
 import os
 from langchain_openai import OpenAIEmbeddings
 from supabase import create_client, Client
-from src.mcp_server.core.config import settings
+from src.core.config import settings
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -246,7 +246,7 @@ def register_tour_search_tools(mcp: FastMCP):
             Dict with:
             - found (int): Number of packages found
             - packages (list): List of tour package dictionaries with:
-                - package_id (str): Package ID (use this for booking)
+                - package_id (str): **UUID format** - Use this EXACT value when calling create_booking!
                 - package_name (str): Package name
                 - destination (str): Destination
                 - price (float): Price in VND
@@ -262,7 +262,7 @@ def register_tour_search_tools(mcp: FastMCP):
             "found": 2,
             "packages": [
                 {
-                    "package_id": "pkg_123",
+                    "package_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                     "package_name": "Đà Lạt 3 ngày 2 đêm",
                     "destination": "Đà Lạt",
                     "price": 3000000,

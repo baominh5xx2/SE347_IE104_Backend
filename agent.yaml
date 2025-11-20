@@ -12,6 +12,7 @@ llm:
   temperature: 1.0
   max_tokens: 256
   streaming: true
+  #reasoning: {"effort": "none"}
 
 # Agents Configuration
 agents:
@@ -125,8 +126,8 @@ agents:
           
           GUIDELINES:
           - If user mentions a destination or wants to book, FIRST show tour recommendations
-          - Automatically search for tours using search_episodes tool when user mentions destinations
-          - Use search_episodes silently - don't tell user you're searching
+          - Automatically search for tours using search_tour_packages tool when user mentions destinations
+          - Use search tools silently - don't tell user you're searching
           - After searching, present results naturally: "Tôi tìm thấy một số tour phù hợp cho bạn..."
           - When showing tour recommendations: Display with clear numbering (1, 2, 3, etc.)
           - DO NOT show Package ID to users - it's internal technical detail
@@ -166,42 +167,6 @@ agents:
       - booking_management
       - context_awareness
       - mcp_integration
-    
-    # Available tools (LangGraph agent pattern)
-    tools:
-      create_booking:
-        description: "Create booking after collecting: user phone and number of people. The system will automatically determine the package_id based on user's tour selection (by name or number). CRITICAL: Do NOT ask user for Package ID - the system handles this internally."
-        parameters:
-          user_phone: "string (required) - User phone number"
-          package_id: "string (required) - Tour package ID UUID. NOTE: Do NOT ask user for this. You will extract it automatically from the tour selection context (tour name or number user chose). The system maintains internal mapping of tour selections to package IDs."
-          number_of_people: "integer (required) - Number of people"
-          special_requests: "string (optional) - Special requests"
-        usage: "ONLY call this tool AFTER: 1) Tour recommendations have been shown to user (with tour names and numbers like 1, 2, 3), 2) User has selected a tour (by name or number), 3) You have collected phone number and number of people. The package_id is automatically mapped from user's tour selection - NEVER ask user to provide it."
-      
-      search_episodes:
-        description: "Search for tour packages and information. Use silently when user mentions destinations or asks about tours."
-        parameters:
-          query_text: "string (REQUIRED) - Search query (e.g., 'Đà Lạt', 'tour Nha Trang')"
-          user_id: "string (optional) - Extract from context automatically, don't ask user"
-          limit: "integer (optional) - Number of results, default 5"
-        usage_examples:
-          user_search: |
-            # Search user's episodes with query
-            search_episodes(
-              query_text="Đà Nẵng",
-              user_id="user_123",
-              limit=2
-            )
-          general_search: |
-            # General semantic search
-            search_episodes(
-              query_text="du lịch miền Trung",
-              limit=2
-            )
-        important_notes:
-          - "query_text is PRIMARY parameter - always provide search query"
-          - "user_id enables personalization when available"
-          - "Graphiti handles hybrid search automatically"
     
   # Recommendation Agent - Called by Chat Agent when needed
   - name: "recommendation_agent"
@@ -269,29 +234,22 @@ agents:
     # Function calling guidelines for recommendation agent
     functions:
       search_episodes:
-        description: "Search user episodes using Graphiti hybrid search"
+        description: "Search user conversation history and preferences stored in Mem0 memory system"
         parameters:
           query_text: "string (REQUIRED) - Search query (e.g., 'Đà Nẵng', 'budget', 'destination')"
-          user_id: "string (optional) - User ID for personalization"
+          user_id: "string (optional) - User ID for personalized search"
           limit: "integer (optional) - Number of results, default 5"
         usage_examples:
-          user_search: |
-            # Search user's episodes with query
-            search_episodes(
-              query_text="Đà Nẵng",
-              user_id="user_123",
-              limit=2
-            )
+          user_history_search: |
+            # Search user's Mem0 history with query
+            search_episodes(query_text="Đà Nẵng", user_id="user_123", limit=2)
           general_search: |
             # General semantic search
-            search_episodes(
-              query_text="du lịch miền Trung",
-              limit=2
-            )
+            search_episodes(query_text="du lịch miền Trung", limit=2)
         important_notes:
-          - "query_text is PRIMARY parameter - always provide search query"
-          - "user_id enables personalization when available"
-          - "Graphiti handles hybrid search automatically"
+          - "query_text is PRIMARY parameter - always provide"
+          - "user_id enables Mem0 personalization when available"
+          - "Mem0 automatically enhances queries with conversation history"
 
 # Workflow Configuration
 workflow:
@@ -383,41 +341,22 @@ tool_calling:
   available_tools:
     create_booking:
       when_to_use: "When user wants to book a tour"
-      required_params: ["user_phone", "package_id", "number_of_people", "travel_date"]
+      required_params: ["user_phone", "package_id", "number_of_people"]
       optional_params: ["special_requests"]
       important: "MUST gather all required information before calling!"
     
     search_episodes:
-      when_to_use: "When searching user history or general information"
+      when_to_use: "When searching user conversation history or preferences"
       required_params: ["query_text"]
       optional_params: ["user_id", "limit"]
-      note: "Uses Graphiti hybrid search - user_id enables personalization"
+      note: "Powered by Mem0 - user_id enables personalization via conversation history"
   
-  # Search episodes guidelines (Graphiti with focal node)
-  search_episodes_rules:
-    - "ALWAYS extract user_id from context when available"
-    - "user_id acts as FOCAL NODE to get ALL user's related data"
-    - "Use specific query_text to filter results"
-    - "Use limit to control number of results (default: 2)"
-    - "Call search BEFORE making recommendations for personalization"
-  
-  # Search parameter mapping
-  search_parameter_sources:
-    user_id: "state.user_id (extracted from conversation context)"
-    query_text: "User query or search term (REQUIRED)"
-    limit: "2 (default) for tour search"
-  
-  # Search query examples
-  search_examples:
-    user_history_search: |
-      search_episodes(query_text="Đà Nẵng", user_id="user_123", limit=2)
-      # Searches user's episodes related to "Đà Nẵng"
-    general_search: |
-      search_episodes(query_text="du lịch miền Trung", limit=2)
-      # General semantic search without user context
-    budget_search: |
-      search_episodes(query_text="budget price", user_id="user_123", limit=2)
-      # Searches user's budget-related episodes
+  # Mem0 integration guidelines
+  mem0_guidelines:
+    - "ALWAYS extract user_id from context when available for personalization"
+    - "Mem0 automatically fetches and enhances queries with conversation history"
+    - "Use specific query_text to filter results by topic"
+    - "Use limit to control number of results (default: 2 for tour search)"
 
 # Capabilities
 capabilities:

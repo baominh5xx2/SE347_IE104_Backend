@@ -4,22 +4,12 @@ Interactive booking collection và management
 """
 from fastmcp import FastMCP
 from typing import Optional, Dict, Any, List
-from supabase import create_client, Client
 from datetime import datetime
-import os
 import logging
-from dotenv import load_dotenv
-from src.mcp_server.utils.falkordb_client import create_booking_in_falkordb, get_user_bookings_from_falkordb
-from src.mcp_server.core.config import settings
-
-load_dotenv()
+from src.resources.supabase import get_supabase_client
 
 # Logger
 logger = logging.getLogger(__name__)
-
-# Supabase connection - use settings or env vars
-SUPABASE_URL = os.getenv("SUPABASE_URL") or getattr(settings, 'SUPABASE_URL', None)
-SUPABASE_KEY = os.getenv("SUPABASE_KEY") or getattr(settings, 'SUPABASE_KEY', None)
 
 
 async def _create_booking_impl(
@@ -34,17 +24,7 @@ async def _create_booking_impl(
     This is separated from the decorator for easier testing.
     """
     try:
-        # Verify Supabase connection
-        if not SUPABASE_URL or not SUPABASE_KEY:
-            logger.error("❌ Supabase credentials not configured")
-            return {
-                "success": False,
-                "error": "Database connection not configured. Please check SUPABASE_URL and SUPABASE_KEY environment variables.",
-                "error_type": "ConfigurationError"
-            }
-        
-        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        logger.debug(f"✅ Supabase client created for URL: {SUPABASE_URL[:30]}...")
+        supabase = get_supabase_client()
         
         # Validate required parameters with clear messages for LLM
         if not package_id:
@@ -293,6 +273,9 @@ def register_booking_tools(mcp: FastMCP):
         """
         Create a new tour booking for a user.
         
+        ⚠️ CRITICAL: package_id MUST be the EXACT UUID from search_tour_packages results!
+        DO NOT make up package IDs like "pkg_nhatrang_1" or "tour_dalat_3days"!
+        
         THIS TOOL AUTOMATICALLY HANDLES ALL LOGIC:
         - Finds or creates user account if needed
         - Validates tour package and availability
@@ -300,15 +283,23 @@ def register_booking_tools(mcp: FastMCP):
         - Calculates total amount
         - Creates booking and updates inventory
         
+        WORKFLOW:
+        1. First call search_tour_packages to find tours
+        2. Get the package_id (UUID format) from search results
+        3. Then call create_booking with that EXACT package_id
+        
         YOU ONLY NEED TO: Collect these information from user and call this tool:
         - user_phone: User's phone number
-        - package_id: Tour package ID from recommendation
+        - package_id: UUID from search results (NOT a made-up string!)
         - number_of_people: Number of people traveling
         - special_requests: Optional special requests
         
         Args:
             user_phone (str): User's phone number. Example: "0912345678"
-            package_id (str): Tour package ID from recommendation results. Example: "package_123"
+            package_id (str): **IMPORTANT**: UUID of tour package from search/recommendation results.
+                              MUST be the EXACT package_id value returned by search_tour_packages tool.
+                              Example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                              DO NOT make up or modify this ID - use the exact value from search results!
             number_of_people (int): Number of people traveling. Must be > 0. Example: 2
             special_requests (str, optional): Special requests or requirements. Example: "Window seat preferred"
         

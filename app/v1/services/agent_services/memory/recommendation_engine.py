@@ -4,7 +4,6 @@ Uses MCP tools for tour recommendations with Mem0 personalization
 """
 from typing import Dict, List, Optional
 import logging
-from app.v1.services.agent_services.mcp_intergation import mcp_client
 from app.v1.services.agent_services.memory import conversation_memory
 
 logger = logging.getLogger(__name__)

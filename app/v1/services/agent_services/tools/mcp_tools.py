@@ -1,66 +1,104 @@
 """
 MCP Tools
-Tools that call MCP server
+Tools that call MCP server directly
 """
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 import asyncio
 import concurrent.futures
 import logging
-from app.v1.services.agent_services.mcp_intergation import mcp_client
+import json
+from fastmcp import Client
+from app.v1.core.config import settings
+from app.v1.schema.shema_tool_mcp import (
+    SearchTourPackagesInput,
+    CreateBookingInput,
+    RequestRecommendationInput,
+    SearchFlightsInput,
+    GetCurrentTemperatureInput,
+    GetWeatherForecastInput,
+    SearchEpisodesInput
+)
 
 logger = logging.getLogger(__name__)
 
 
-class SearchTourPackagesInput(BaseModel):
-    """Input schema for search_tour_packages tool"""
-    user_message: str = Field(description="User's search query in Vietnamese or English")
-    max_price: Optional[float] = Field(default=None, description="Maximum price filter in VND")
-    duration: Optional[int] = Field(default=None, description="Duration filter in days")
-    destination: Optional[str] = Field(default=None, description="Destination filter")
-    limit: int = Field(default=10, description="Maximum number of results")
+# ============================================================================
+# MCP CLIENT HELPER
+# ============================================================================
+
+async def call_mcp_tool(tool_name: str, params: Dict[str, Any]) -> Any:
+    """
+    Generic function to call any MCP tool
+    
+    Args:
+        tool_name: Name of the MCP tool
+        params: Tool parameters
+        
+    Returns:
+        Tool result (parsed from JSON if possible)
+    """
+    # Get MCP config
+    from app.v1.core.prompts import PromptManager
+    mcp_config = PromptManager().get_mcp_config()
+    
+    base_url = settings.MCP_SERVER_URL or mcp_config.get('server_url', 'http://localhost:8000/mcp/mcp')
+    
+    async with Client(base_url) as client:
+        result = await client.call_tool(tool_name, params)
+        
+        # Handle CallToolResult object from FastMCP
+        if hasattr(result, 'content'):
+            content_list = result.content
+            text_content = ""
+            for item in content_list:
+                if hasattr(item, 'text'):
+                    text_content += item.text
+                elif isinstance(item, dict) and item.get("type") == "text":
+                    text_content += item.get("text", "")
+            
+            try:
+                return json.loads(text_content)
+            except json.JSONDecodeError:
+                return text_content
+        
+        # Handle string result
+        if isinstance(result, str):
+            try:
+                return json.loads(result)
+            except json.JSONDecodeError:
+                return result
+        
+        return result
 
 
-class CreateBookingInput(BaseModel):
-    """Input schema for create_booking tool"""
-    user_phone: str = Field(description="User phone number")
-    package_id: str = Field(description="Tour package ID from recommendation results")
-    number_of_people: int = Field(description="Number of people traveling")
-    special_requests: str = Field(default="", description="Special requests or requirements")
+def run_async_in_thread(coro):
+    """
+    Run async coroutine in a new thread with its own event loop
+    
+    Args:
+        coro: Async coroutine to run
+        
+    Returns:
+        Result from coroutine
+    """
+    def run_in_thread():
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        try:
+            return new_loop.run_until_complete(coro)
+        finally:
+            try:
+                new_loop.run_until_complete(asyncio.sleep(0.1))
+            except:
+                pass
+            new_loop.close()
+    
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(run_in_thread)
+        return future.result(timeout=30)
 
-
-class RequestRecommendationInput(BaseModel):
-    """Input schema for request_recommendation tool"""
-    user_query: str = Field(description="User's query or request for tour recommendations")
-    destination: Optional[str] = Field(default=None, description="Destination if mentioned")
-    budget: Optional[float] = Field(default=None, description="Budget if mentioned")
-    duration: Optional[int] = Field(default=None, description="Duration in days if mentioned")
-
-
-class SearchFlightsInput(BaseModel):
-    """Input schema for search_flights tool"""
-    departure_iata: str = Field(description="Departure airport IATA code (e.g., HAN for Hanoi, SGN for Ho Chi Minh)")
-    arrival_iata: str = Field(description="Arrival airport IATA code (e.g., SGN for Ho Chi Minh, HAN for Hanoi)")
-    limit: int = Field(default=5, description="Maximum number of flights to return (1-100)")
-
-
-class GetCurrentTemperatureInput(BaseModel):
-    """Input schema for get_current_temperature tool"""
-    city_name: str = Field(description="City name to get current weather for")
-
-
-class GetWeatherForecastInput(BaseModel):
-    """Input schema for get_weather_forecast tool"""
-    city_name: str = Field(description="City name to get weather forecast for")
-    days: int = Field(default=5, description="Number of days to forecast (1-5)")
-
-
-class SearchEpisodesInput(BaseModel):
-    """Input schema for search_episodes tool"""
-    query_text: str = Field(description="Search query text to find relevant episodes in conversation history")
-    user_id: Optional[str] = Field(default=None, description="Optional user ID for personalized search")
-    limit: int = Field(default=5, description="Maximum number of results to return (1-20)")
 
 
 def create_booking_sync(user_phone: str, package_id: str, number_of_people: int, special_requests: str = ""):
@@ -76,50 +114,16 @@ def create_booking_sync(user_phone: str, package_id: str, number_of_people: int,
     Returns:
         Booking result dict
     """
-    def run_in_thread():
-        """Run async function in a new thread with its own event loop"""
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            # Create a new client for this event loop to avoid connection pool issues
-            from app.v1.services.agent_services.mcp_intergation import MCPIntegrationService
-            from app.v1.core.config import settings
-            
-            # Create a temporary client for this thread
-            temp_client = MCPIntegrationService(
-                retry_count=settings.MCP_RETRY_COUNT,
-                retry_backoff=settings.MCP_RETRY_BACKOFF
-            )
-            
-            try:
-                result = new_loop.run_until_complete(
-                    temp_client.create_booking(
-                        user_phone=user_phone,
-                        package_id=package_id,
-                        number_of_people=number_of_people,
-                        special_requests=special_requests
-                    )
-                )
-                return result
-            finally:
-                # Cleanup client before closing event loop
-                try:
-                    new_loop.run_until_complete(temp_client.close())
-                except Exception as cleanup_error:
-                    logger.debug(f"Cleanup error (non-critical): {cleanup_error}")
-        finally:
-            # Give a moment for cleanup to complete
-            try:
-                new_loop.run_until_complete(asyncio.sleep(0.1))
-            except:
-                pass
-            new_loop.close()
-    
     try:
-        # Always use thread pool to avoid event loop conflicts
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            result = future.result(timeout=30)
+        params = {
+            "user_phone": user_phone,
+            "package_id": package_id,
+            "number_of_people": number_of_people
+        }
+        if special_requests:
+            params["special_requests"] = special_requests
+        
+        result = run_async_in_thread(call_mcp_tool("create_booking", params))
     except concurrent.futures.TimeoutError:
         logger.error("create_booking_sync timeout")
         return {"error": "Request timeout"}
@@ -213,50 +217,16 @@ def search_tour_packages_sync(
     Returns:
         Dict with 'found' and 'packages' keys
     """
-    def run_in_thread():
-        """Run async function in a new thread with its own event loop"""
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            # Create a new client for this event loop to avoid connection pool issues
-            from app.v1.services.agent_services.mcp_intergation import MCPIntegrationService
-            from app.v1.core.config import settings
-            
-            # Create a temporary client for this thread
-            temp_client = MCPIntegrationService(
-                retry_count=settings.MCP_RETRY_COUNT,
-                retry_backoff=settings.MCP_RETRY_BACKOFF
-            )
-            
-            try:
-                result = new_loop.run_until_complete(
-                    temp_client.search_tour_packages(
-                        user_message=user_message,
-                        max_price=max_price,
-                        duration=duration,
-                        destination=destination,
-                        limit=limit
-                    )
-                )
-                return result
-            finally:
-                # Cleanup client before closing event loop
-                try:
-                    new_loop.run_until_complete(temp_client.close())
-                except Exception as cleanup_error:
-                    logger.debug(f"Cleanup error (non-critical): {cleanup_error}")
-        finally:
-            # Give a moment for cleanup to complete
-            try:
-                new_loop.run_until_complete(asyncio.sleep(0.1))
-            except:
-                pass
-            new_loop.close()
-    
     try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            result = future.result(timeout=30)
+        params = {"user_message": user_message, "limit": limit}
+        if max_price is not None:
+            params["max_price"] = max_price
+        if duration is not None:
+            params["duration"] = duration
+        if destination:
+            params["destination"] = destination
+        
+        result = run_async_in_thread(call_mcp_tool("search_tour_packages", params))
     except concurrent.futures.TimeoutError:
         logger.error("search_tour_packages_sync timeout")
         return {"found": 0, "packages": [], "error": "Request timeout"}
@@ -288,44 +258,13 @@ def search_flights_sync(departure_iata: str, arrival_iata: str, limit: int = 5) 
     Returns:
         Formatted flight information string
     """
-    def run_in_thread():
-        """Run async function in a new thread with its own event loop"""
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            from app.v1.services.agent_services.mcp_intergation import MCPIntegrationService
-            from app.v1.core.config import settings
-            
-            temp_client = MCPIntegrationService(
-                retry_count=settings.MCP_RETRY_COUNT,
-                retry_backoff=settings.MCP_RETRY_BACKOFF
-            )
-            
-            try:
-                result = new_loop.run_until_complete(
-                    temp_client.search_flights(
-                        departure_iata=departure_iata,
-                        arrival_iata=arrival_iata,
-                        limit=limit
-                    )
-                )
-                return result
-            finally:
-                try:
-                    new_loop.run_until_complete(temp_client.close())
-                except Exception as cleanup_error:
-                    logger.debug(f"Cleanup error (non-critical): {cleanup_error}")
-        finally:
-            try:
-                new_loop.run_until_complete(asyncio.sleep(0.1))
-            except:
-                pass
-            new_loop.close()
-    
     try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            result = future.result(timeout=30)
+        params = {
+            "departure_iata": departure_iata,
+            "arrival_iata": arrival_iata,
+            "limit": limit
+        }
+        result = run_async_in_thread(call_mcp_tool("search_flights", params))
     except concurrent.futures.TimeoutError:
         logger.error("search_flights_sync timeout")
         return "Error: Request timeout"
@@ -346,40 +285,9 @@ def get_current_temperature_sync(city_name: str) -> str:
     Returns:
         Current weather information string
     """
-    def run_in_thread():
-        """Run async function in a new thread with its own event loop"""
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            from app.v1.services.agent_services.mcp_intergation import MCPIntegrationService
-            from app.v1.core.config import settings
-            
-            temp_client = MCPIntegrationService(
-                retry_count=settings.MCP_RETRY_COUNT,
-                retry_backoff=settings.MCP_RETRY_BACKOFF
-            )
-            
-            try:
-                result = new_loop.run_until_complete(
-                    temp_client.get_current_temperature(city_name=city_name)
-                )
-                return result
-            finally:
-                try:
-                    new_loop.run_until_complete(temp_client.close())
-                except Exception as cleanup_error:
-                    logger.debug(f"Cleanup error (non-critical): {cleanup_error}")
-        finally:
-            try:
-                new_loop.run_until_complete(asyncio.sleep(0.1))
-            except:
-                pass
-            new_loop.close()
-    
     try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            result = future.result(timeout=15)
+        params = {"city_name": city_name}
+        result = run_async_in_thread(call_mcp_tool("get_current_temperature_by_city", params))
     except concurrent.futures.TimeoutError:
         logger.error("get_current_temperature_sync timeout")
         return "Error: Request timeout"
@@ -401,40 +309,9 @@ def get_weather_forecast_sync(city_name: str, days: int = 5) -> str:
     Returns:
         Weather forecast information string
     """
-    def run_in_thread():
-        """Run async function in a new thread with its own event loop"""
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            from app.v1.services.agent_services.mcp_intergation import MCPIntegrationService
-            from app.v1.core.config import settings
-            
-            temp_client = MCPIntegrationService(
-                retry_count=settings.MCP_RETRY_COUNT,
-                retry_backoff=settings.MCP_RETRY_BACKOFF
-            )
-            
-            try:
-                result = new_loop.run_until_complete(
-                    temp_client.get_weather_forecast(city_name=city_name, days=days)
-                )
-                return result
-            finally:
-                try:
-                    new_loop.run_until_complete(temp_client.close())
-                except Exception as cleanup_error:
-                    logger.debug(f"Cleanup error (non-critical): {cleanup_error}")
-        finally:
-            try:
-                new_loop.run_until_complete(asyncio.sleep(0.1))
-            except:
-                pass
-            new_loop.close()
-    
     try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            result = future.result(timeout=15)
+        params = {"city_name": city_name, "days": days}
+        result = run_async_in_thread(call_mcp_tool("get_weather_forecast_by_city", params))
     except concurrent.futures.TimeoutError:
         logger.error("get_weather_forecast_sync timeout")
         return "Error: Request timeout"
@@ -445,61 +322,29 @@ def get_weather_forecast_sync(city_name: str, days: int = 5) -> str:
     return result if result else "Error: No response from MCP server"
 
 
-def search_episodes_sync(query_text: str, user_id: Optional[str] = None, limit: int = 5) -> Dict:
+def search_mem0_episodes_sync(search_query: str, user_id: Optional[str] = None, limit: int = 5) -> Dict:
     """
-    Sync wrapper for search_episodes MCP tool
+    Sync wrapper for search_episodes MCP tool via Mem0
     
     Args:
-        query_text: Search query text
+        search_query: Search query text for Mem0
         user_id: Optional user ID for personalized search
         limit: Maximum number of results
         
     Returns:
         Dict with 'found' and 'episodes' keys
     """
-    def run_in_thread():
-        """Run async function in a new thread with its own event loop"""
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            from app.v1.services.agent_services.mcp_intergation import MCPIntegrationService
-            from app.v1.core.config import settings
-            
-            temp_client = MCPIntegrationService(
-                retry_count=settings.MCP_RETRY_COUNT,
-                retry_backoff=settings.MCP_RETRY_BACKOFF
-            )
-            
-            try:
-                result = new_loop.run_until_complete(
-                    temp_client.search_episodes(
-                        query_text=query_text,
-                        user_id=user_id,
-                        limit=limit
-                    )
-                )
-                return result
-            finally:
-                try:
-                    new_loop.run_until_complete(temp_client.close())
-                except Exception as cleanup_error:
-                    logger.debug(f"Cleanup error (non-critical): {cleanup_error}")
-        finally:
-            try:
-                new_loop.run_until_complete(asyncio.sleep(0.1))
-            except:
-                pass
-            new_loop.close()
-    
     try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            result = future.result(timeout=15)
+        params = {"query_text": search_query, "limit": limit}
+        if user_id:
+            params["user_id"] = user_id
+        
+        result = run_async_in_thread(call_mcp_tool("search_episodes", params))
     except concurrent.futures.TimeoutError:
-        logger.error("search_episodes_sync timeout")
+        logger.error("search_mem0_episodes_sync timeout")
         return {"found": 0, "episodes": [], "error": "Request timeout"}
     except Exception as e:
-        logger.error(f"Error in search_episodes_sync: {e}")
+        logger.error(f"Error in search_mem0_episodes_sync: {e}")
         return {"found": 0, "episodes": [], "error": f"Failed to search: {str(e)}"}
     
     return result if result else {"found": 0, "episodes": []}
@@ -535,11 +380,11 @@ def get_weather_forecast_tool() -> StructuredTool:
     )
 
 
-def search_episodes_tool() -> StructuredTool:
-    """Create StructuredTool for search_episodes"""
+def search_mem0_episodes_tool() -> StructuredTool:
+    """Create StructuredTool for search_mem0_episodes"""
     return StructuredTool.from_function(
-        func=search_episodes_sync,
+        func=search_mem0_episodes_sync,
         name="search_episodes",
-        description="Search through conversation history and user interactions stored in the knowledge graph to find relevant episodes. Use this to find past conversations or user preferences related to the query.",
+        description="Search through conversation history and user interactions stored in Mem0 memory system to find relevant episodes. Use this to find past conversations or user preferences related to the query.",
         args_schema=SearchEpisodesInput
     )
