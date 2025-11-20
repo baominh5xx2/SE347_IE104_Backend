@@ -148,6 +148,10 @@ class ChatAgentNodes:
                     recommendation_params = tool_call.get("args", {})
                     break
             
+            # Extract user_id and user_phone from state (will be used for auto-injection)
+            user_id = state.get("user_id", "")
+            user_phone = state.get("user_phone", "")
+            
             # Execute all tool calls
             logger.info(f"⚙️ [Chat Tools] Executing {len(last_message.tool_calls)} tool(s)...")
             tool_results = []
@@ -173,6 +177,23 @@ class ChatAgentNodes:
                                         tool_args = parsed_args
                             except (json.JSONDecodeError, Exception):
                                 pass
+                        
+                        # Auto-inject user_id for get_user_bookings tool
+                        if tool_name == "get_user_bookings" and user_id:
+                            tool_args["user_id"] = user_id
+                            logger.info(f"✅ Auto-injected user_id '{user_id}' into get_user_bookings")
+                        
+                        # Auto-inject user_phone and user_id for create_booking tool
+                        if tool_name == "create_booking":
+                            # Inject user_phone if available and not provided
+                            if user_phone and not tool_args.get("user_phone"):
+                                tool_args["user_phone"] = user_phone
+                                logger.info(f"✅ Auto-injected user_phone '{user_phone}' into create_booking")
+                            
+                            # Inject user_id if available and not provided
+                            if user_id and not tool_args.get("user_id"):
+                                tool_args["user_id"] = user_id
+                                logger.info(f"✅ Auto-injected user_id '{user_id}' into create_booking")
                         
                         # Optional validation for create_booking tool (only warn, don't block)
                         if tool_name == "create_booking" and isinstance(tool_args, dict):

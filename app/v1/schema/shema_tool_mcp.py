@@ -16,6 +16,7 @@ class CreateBookingInput(BaseModel):
     package_id: str = Field(description="Tour package ID from recommendation results")
     number_of_people: int = Field(description="Number of people traveling")
     special_requests: str = Field(default="", description="Special requests or requirements")
+    user_id: Optional[str] = Field(default=None, description="User ID if available (for authenticated users)")
 
 
 class RequestRecommendationInput(BaseModel):

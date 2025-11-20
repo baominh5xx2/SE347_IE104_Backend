@@ -25,7 +25,7 @@ async def chat_stream(request: ChatRequest):
     try:
         # Generate conversation_id if not provided
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
-        user_id = request.user_id or "anonymous_user4"
+        user_id = request.user_id or "df40e279-3389-4d4b-8d94-6ef74d9545b4"
         
         async def event_generator():
             try:
@@ -149,7 +149,7 @@ async def chat(request: ChatRequest):
     try:
         # Generate conversation_id if not provided
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
-        user_id = request.user_id or "anonymous_user4"
+        user_id = request.user_id or "df40e279-3389-4d4b-8d94-6ef74d9545b4"
         
         # Process message through supervisor graph
         result = await supervisor_graph.process_message(

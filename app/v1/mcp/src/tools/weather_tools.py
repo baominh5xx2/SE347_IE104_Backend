@@ -1,15 +1,14 @@
 """
 MCP Tools - Weather Tools
 Get current weather and forecasts using OpenWeatherMap API
-
-This module provides a WeatherService class for retrieving weather information
-from the OpenWeatherMap API, following OOP principles and Python coding conventions.
 """
 from fastmcp import FastMCP
 from typing import Dict, Any, Optional
 import httpx
 from datetime import datetime, timezone, timedelta
+from pydantic import ValidationError
 from ..core.config import settings
+from app.v1.mcp.src.schema import GetCurrentTemperatureInput, GetWeatherForecastInput
 
 
 class WeatherService:
@@ -267,27 +266,29 @@ def register_weather_tools(mcp: FastMCP):
     @mcp.tool()
     async def get_current_temperature_by_city(city_name: str) -> str:
         """
-        MCP tool wrapper for getting current temperature.
+        Get current temperature and weather conditions for a city.
         
-        Args:
-            city_name (str): Name of the city
-            
         Returns:
-            str: Weather information
+            str: Temperature, feels-like temperature, humidity, and weather description
+                 in Vietnam timezone (UTC+7)
         """
-        return await weather_service.get_current_temperature(city_name)
+        try:
+            validated = GetCurrentTemperatureInput(city_name=city_name)
+            return await weather_service.get_current_temperature(validated.city_name)
+        except ValidationError as e:
+            return f"❌ Input Validation Error: {str(e)}"
     
     @mcp.tool()
     async def get_weather_forecast_by_city(city_name: str, days: int = 5) -> str:
         """
-        MCP tool wrapper for getting weather forecast.
+        Get weather forecast for a city for the next few days.
         
-        Args:
-            city_name (str): Name of the city
-            days (int): Number of days to forecast (1-5)
-            
         Returns:
-            str: Forecast information
+            str: Daily forecast including temperature, humidity, and weather conditions
         """
-        return await weather_service.get_weather_forecast(city_name, days)
+        try:
+            validated = GetWeatherForecastInput(city_name=city_name, days=days)
+            return await weather_service.get_weather_forecast(validated.city_name, validated.days)
+        except ValidationError as e:
+            return f"❌ Input Validation Error: {str(e)}"
 

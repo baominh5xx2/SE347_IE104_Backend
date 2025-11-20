@@ -20,6 +20,11 @@ from app.v1.schema.shema_tool_mcp import (
     GetWeatherForecastInput,
     SearchEpisodesInput
 )
+from app.v1.mcp.src.schema import (
+    GetUserBookingsInput,
+    UpdateBookingInput,
+    DeleteBookingInput
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +106,7 @@ def run_async_in_thread(coro):
 
 
 
-def create_booking_sync(user_phone: str, package_id: str, number_of_people: int, special_requests: str = ""):
+def create_booking_sync(user_phone: str, package_id: str, number_of_people: int, special_requests: str = "", user_id: Optional[str] = None):
     """
     Sync wrapper for create_booking MCP tool
     
@@ -110,6 +115,7 @@ def create_booking_sync(user_phone: str, package_id: str, number_of_people: int,
         package_id: Tour package ID
         number_of_people: Number of people
         special_requests: Special requests
+        user_id: Optional user ID
         
     Returns:
         Booking result dict
@@ -122,6 +128,8 @@ def create_booking_sync(user_phone: str, package_id: str, number_of_people: int,
         }
         if special_requests:
             params["special_requests"] = special_requests
+        if user_id:
+            params["user_id"] = user_id
         
         result = run_async_in_thread(call_mcp_tool("create_booking", params))
     except concurrent.futures.TimeoutError:
@@ -149,6 +157,95 @@ def create_booking_sync(user_phone: str, package_id: str, number_of_people: int,
     
     # Non-dict result
     return {"error": f"Failed to create booking: Unexpected response type: {type(result)}"}
+
+
+def get_user_bookings_sync(user_id: str) -> Dict[str, Any]:
+    """
+    Sync wrapper for get_user_bookings MCP tool
+    
+    Args:
+        user_id: User ID to fetch bookings for
+        
+    Returns:
+        Dict with 'success' and 'bookings' keys
+    """
+    try:
+        params = {"user_id": user_id}
+        result = run_async_in_thread(call_mcp_tool("get_user_bookings", params))
+    except concurrent.futures.TimeoutError:
+        logger.error("get_user_bookings_sync timeout")
+        return {"success": False, "error": "Request timeout"}
+    except Exception as e:
+        logger.error(f"Error in get_user_bookings_sync: {e}")
+        return {"success": False, "error": f"Failed to get bookings: {str(e)}"}
+    
+    if result is None:
+        return {"success": False, "error": "No response from MCP server"}
+    
+    return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
+
+
+def update_booking_sync(booking_id: str, number_of_people: Optional[int] = None, special_requests: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Sync wrapper for update_booking MCP tool
+    
+    Args:
+        booking_id: Booking ID to update
+        number_of_people: New number of people (optional)
+        special_requests: New special requests (optional)
+        
+    Returns:
+        Dict with success status
+    """
+    try:
+        params = {"booking_id": booking_id}
+        if number_of_people is not None:
+            params["number_of_people"] = number_of_people
+        if special_requests is not None:
+            params["special_requests"] = special_requests
+        
+        result = run_async_in_thread(call_mcp_tool("update_booking", params))
+    except concurrent.futures.TimeoutError:
+        logger.error("update_booking_sync timeout")
+        return {"success": False, "error": "Request timeout"}
+    except Exception as e:
+        logger.error(f"Error in update_booking_sync: {e}")
+        return {"success": False, "error": f"Failed to update booking: {str(e)}"}
+    
+    if result is None:
+        return {"success": False, "error": "No response from MCP server"}
+    
+    return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
+
+
+def delete_booking_sync(booking_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Sync wrapper for delete_booking MCP tool
+    
+    Args:
+        booking_id: Booking ID to cancel
+        reason: Optional reason for cancellation
+        
+    Returns:
+        Dict with success status
+    """
+    try:
+        params = {"booking_id": booking_id}
+        if reason:
+            params["reason"] = reason
+        
+        result = run_async_in_thread(call_mcp_tool("delete_booking", params))
+    except concurrent.futures.TimeoutError:
+        logger.error("delete_booking_sync timeout")
+        return {"success": False, "error": "Request timeout"}
+    except Exception as e:
+        logger.error(f"Error in delete_booking_sync: {e}")
+        return {"success": False, "error": f"Failed to delete booking: {str(e)}"}
+    
+    if result is None:
+        return {"success": False, "error": "No response from MCP server"}
+    
+    return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
 
 
 def request_recommendation_sync(user_query: str, destination: Optional[str] = None, budget: Optional[float] = None, duration: Optional[int] = None):
@@ -184,6 +281,36 @@ def create_booking_tool() -> StructuredTool:
         name="create_booking",
         description="Tạo booking mới cho user - YÊU CẦU THU THẬP ĐẦY ĐỦ THÔNG TIN TRƯỚC KHI GỌI (user_phone, package_id, number_of_people)",
         args_schema=CreateBookingInput
+    )
+
+
+def get_user_bookings_tool() -> StructuredTool:
+    """Create StructuredTool for get_user_bookings"""
+    return StructuredTool.from_function(
+        func=get_user_bookings_sync,
+        name="get_user_bookings",
+        description="Lấy danh sách tất cả các booking của user. Trả về chi tiết tour, ngày khởi hành, số người, tổng tiền và trạng thái booking.",
+        args_schema=GetUserBookingsInput
+    )
+
+
+def update_booking_tool() -> StructuredTool:
+    """Create StructuredTool for update_booking"""
+    return StructuredTool.from_function(
+        func=update_booking_sync,
+        name="update_booking",
+        description="Cập nhật booking hiện tại - có thể thay đổi số người hoặc ghi chú đặc biệt. Nếu tăng số người, hệ thống tự động kiểm tra còn slot và cập nhật giá.",
+        args_schema=UpdateBookingInput
+    )
+
+
+def delete_booking_tool() -> StructuredTool:
+    """Create StructuredTool for delete_booking"""
+    return StructuredTool.from_function(
+        func=delete_booking_sync,
+        name="delete_booking",
+        description="Hủy (cancel) booking và trả lại slot cho tour. Dữ liệu booking được giữ lại với trạng thái 'cancelled' (soft delete).",
+        args_schema=DeleteBookingInput
     )
 
 
@@ -387,4 +514,32 @@ def search_mem0_episodes_tool() -> StructuredTool:
         name="search_episodes",
         description="Search through conversation history and user interactions stored in Mem0 memory system to find relevant episodes. Use this to find past conversations or user preferences related to the query.",
         args_schema=SearchEpisodesInput
+    )
+
+
+def generate_tour_ui_sync(packages: list) -> Dict:
+    """Generate interactive UI for tour packages using MCP-UI"""
+    try:
+        params = {"packages": packages}
+        result = run_async_in_thread(call_mcp_tool("generate_tour_ui", params))
+    except concurrent.futures.TimeoutError:
+        logger.error("generate_tour_ui_sync timeout")
+        return {"error": "Request timeout"}
+    except Exception as e:
+        logger.error(f"Error in generate_tour_ui_sync: {e}")
+        return {"error": f"Failed to generate UI: {str(e)}"}
+    
+    return result if result else {"error": "No response from MCP server"}
+
+
+def generate_tour_ui_tool() -> StructuredTool:
+    """Create StructuredTool for generate_tour_ui"""
+    class GenerateTourUIInput(BaseModel):
+        packages: list = Field(..., description="List of tour package dictionaries to display in UI grid")
+    
+    return StructuredTool.from_function(
+        func=generate_tour_ui_sync,
+        name="generate_tour_ui",
+        description="Generate beautiful interactive UI component displaying tour packages in a responsive grid. Use this after getting tour recommendations to show them visually with images, prices, and booking buttons.",
+        args_schema=GenerateTourUIInput
     )
