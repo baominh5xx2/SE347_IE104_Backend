@@ -74,43 +74,18 @@ class ChatAgentNodes:
                     context_str += f"{idx}. {memory_content}\n"
                 system_prompt += context_str
             
-            # Add context about recommended tours if available
-            recommended_package_ids = state.get("recommended_package_ids", [])
-            tour_packages = state.get("tour_packages", [])
-            
-            if tour_packages:
-                # Build detailed context about available tours
-                tours_context = "\n\n⚠️ CRITICAL CONTEXT - YOU ALREADY HAVE TOUR RECOMMENDATIONS:\n"
-                tours_context += "You have already shown these tours to the user. User is likely SELECTING from this list, NOT requesting new tours.\n\n"
-                tours_context += "Available tours (user may refer to them by number):\n"
-                for idx, pkg in enumerate(tour_packages, start=1):
-                    pkg_name = pkg.get("package_name", "Unknown Tour")
-                    pkg_id = pkg.get("package_id", "N/A")
-                    destination = pkg.get("destination", "N/A")
-                    price = pkg.get("price", 0)
-                    duration = pkg.get("duration_days", 0)
-                    tours_context += f"{idx}. {pkg_name} (ID: {pkg_id}) - {destination}, {duration} days, {price:,} VND\n"
-                tours_context += f"\n⚠️ DO NOT call request_recommendation if:\n"
-                tours_context += "- User mentions this destination (e.g., '{tour_packages[0].get('destination', 'Đà Lạt')}') - they're selecting, not requesting\n"
-                tours_context += "- User provides number of people or phone - they're booking, not searching\n"
-                tours_context += "- User says 'tour đà lạt đi' or similar - they're choosing from your list\n"
-                tours_context += f"- User refers to tours by number ('tour 1', 'tour số 2') - use package_id from above\n\n"
-                tours_context += "ONLY call request_recommendation if user EXPLICITLY asks for NEW/DIFFERENT tours.\n\n"
-                
-                # Add date information context
-                tours_context += "📅 CRITICAL - ABOUT DATES:\n"
-                tours_context += "- Each tour package has FIXED start_date and end_date (already shown in tour details)\n"
-                tours_context += "- Dates are NOT user choice - they are predetermined in the package\n"
-                tours_context += "- DO NOT ask user for 'ngày dự kiến khởi hành' or 'ngày đi'\n"
-                tours_context += "- When displaying tours, always show start_date and end_date from package data\n"
-                tours_context += "- For booking, you only need: phone, package_id, and number_of_people\n"
-                
-                system_prompt += tours_context
-            elif recommended_package_ids:
-                # Fallback: only have IDs
-                package_ids_context = f"\n\nIMPORTANT CONTEXT: Available package IDs from recent recommendations: {', '.join(recommended_package_ids)}. When creating booking, use one of these exact package IDs."
-                system_prompt += package_ids_context
-            
+            # If we have tour packages in state from previous recommendation, inject them
+            tour_packages_in_state = state.get("tour_packages", [])
+            if tour_packages_in_state:
+                packages_str = "\n\n🎯 AVAILABLE TOURS (use these exact package_ids for booking):\n"
+                for idx, pkg in enumerate(tour_packages_in_state[:10], 1):  # Max 10
+                    packages_str += f"{idx}. {pkg.get('package_name', 'Unknown')}\n"
+                    packages_str += f"   📍 {pkg.get('destination', '')} - {pkg.get('duration_days', 0)} ngày\n"
+                    packages_str += f"   💰 {pkg.get('price', 0):,.0f} VNĐ/người\n"
+                    packages_str += f"   🆔 package_id: {pkg.get('package_id', 'N/A')}\n\n"
+                system_prompt += packages_str
+                logger.info(f"✅ Injected {len(tour_packages_in_state)} tours from state into agent context")
+                        
             # Build messages for LLM
             messages = [SystemMessage(content=system_prompt)]
             
@@ -202,8 +177,28 @@ class ChatAgentNodes:
                         # Optional validation for create_booking tool (only warn, don't block)
                         if tool_name == "create_booking" and isinstance(tool_args, dict):
                             package_id = tool_args.get("package_id")
-                            recommended_package_ids = state.get("recommended_package_ids", [])
                             
+                            # Get packages from state (persisted from recommendation)
+                            tour_packages = state.get("tour_packages", [])
+                            recommended_package_ids = [pkg.get("package_id") for pkg in tour_packages if pkg.get("package_id")]
+                            
+                            # SMART ID RESOLUTION: Map index/number to real package_id
+                            # If package_id is a small number (e.g. "1", "2") or "tour 1", map it to real ID
+                            if package_id and tour_packages:
+                                try:
+                                    # Clean up input (remove "tour", "số", etc)
+                                    clean_id = str(package_id).lower().replace("tour", "").replace("số", "").strip()
+                                    if clean_id.isdigit():
+                                        idx = int(clean_id) - 1 # 1-based index to 0-based
+                                        if 0 <= idx < len(tour_packages):
+                                            real_package_id = tour_packages[idx].get("package_id")
+                                            if real_package_id:
+                                                logger.info(f"🔄 Smart Resolution: Mapped '{package_id}' -> '{real_package_id}'")
+                                                tool_args["package_id"] = real_package_id
+                                                package_id = real_package_id # Update local var for checks below
+                                except Exception as map_err:
+                                    logger.warning(f"⚠️ Failed to map package_id '{package_id}': {map_err}")
+
                             # Just log warning if no recommendations, but allow booking to proceed
                             # MCP server will validate the package_id anyway
                             if not recommended_package_ids:

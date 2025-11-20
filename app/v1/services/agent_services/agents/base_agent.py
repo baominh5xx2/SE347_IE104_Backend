@@ -27,6 +27,7 @@ class BaseAgent(ABC):
         name: str,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
+        reasoning: Optional[dict] = None,
         **kwargs
     ):
         """
@@ -36,10 +37,12 @@ class BaseAgent(ABC):
             name: Agent name for logging
             model: LLM model (defaults to config)
             temperature: LLM temperature (defaults to config)
+            reasoning: Reasoning config (defaults to config)
         """
         self.name = name
         self.model = model or agent_config.model
         self.temperature = temperature if temperature is not None else agent_config.temperature
+        self.reasoning = reasoning or getattr(agent_config, 'reasoning', None)
         
         # Initialize LLM
         callbacks = [agent_callback] if agent_callback and agent_config.enable_streaming else []
@@ -47,31 +50,28 @@ class BaseAgent(ABC):
         # Build LLM kwargs
         llm_kwargs = {
             "model": self.model,
-            "api_key": agent_config.api_key,
-            "temperature": self.temperature,
-            "streaming": agent_config.enable_streaming,
-            "callbacks": callbacks,
-            "verbose": agent_config.enable_streaming
+            "api_key": agent_config.api_key
         }
         
-        # Add organization if provided
+        # if self.temperature is not None:
+        #     llm_kwargs["temperature"] = self.temperature
+            
+        if agent_config.enable_streaming:
+            llm_kwargs["streaming"] = agent_config.enable_streaming
+            
+        if callbacks:
+            llm_kwargs["callbacks"] = callbacks
+            
+        if agent_config.enable_streaming:
+            llm_kwargs["verbose"] = agent_config.enable_streaming
+        
+        if self.reasoning:
+            llm_kwargs["reasoning"] = self.reasoning
+            
         if agent_config.organization:
             llm_kwargs["organization"] = agent_config.organization
         
         self.llm = ChatOpenAI(**llm_kwargs)
-    
-    @abstractmethod
-    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Process agent logic
-        
-        Args:
-            state: Current agent state
-            
-        Returns:
-            Updated state
-        """
-        pass
     
     def get_llm(self) -> ChatOpenAI:
         """Get LLM instance"""

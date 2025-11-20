@@ -16,7 +16,6 @@ __all__ = [
     "ChatAgent",
     "RecommendationAgent",
     "recommendation_agent",
-    # Legacy exports
     "DualAgentSystem",
     "dual_agent_system"
 ]

@@ -12,7 +12,7 @@ except ImportError:
     import sys
     import os
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
-    from src.mcp_server.core.config import settings
+    from src.core.config import settings
 
 
 class FlightService:

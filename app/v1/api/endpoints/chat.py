@@ -96,14 +96,21 @@ async def chat_stream(request: ChatRequest):
                 # Send done
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 
-                # Store episode in memory
+                # Store episode in memory (without large tour_packages data to avoid metadata limit)
                 try:
+                    # Only store lightweight metadata to avoid Mem0 2000 char limit
+                    storage_metadata = metadata.copy() if metadata else {}
+                    
+                    # Remove large data that would exceed Mem0 limit
+                    storage_metadata.pop('tour_packages', None)
+                    storage_metadata.pop('recommended_package_ids', None)
+                    
                     await conversation_memory.store_episode(
                         conversation_id=conversation_id,
                         user_id=user_id,
                         user_message=request.message,
                         assistant_response=full_response,
-                        metadata=metadata
+                        metadata=storage_metadata
                     )
                 except Exception as e:
                     logger.warning(f"Failed to store episode: {str(e)}")

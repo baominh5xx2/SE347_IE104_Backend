@@ -6,7 +6,7 @@ from fastmcp import FastMCP
 from typing import Optional, Dict, Any
 import logging
 
-from src.mcp_server.core.mem0_client import mem0_client
+from src.core.mem0_client import mem0_client
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ from .mcp_tools import (
     search_flights_tool,
     get_current_temperature_tool,
     get_weather_forecast_tool,
-    search_episodes_tool
+    search_mem0_episodes_tool
 )
 
 __all__ = ["get_chat_tools"]
@@ -30,6 +30,6 @@ def get_chat_tools() -> List[StructuredTool]:
         search_flights_tool(),
         get_current_temperature_tool(),
         get_weather_forecast_tool(),
-        search_episodes_tool()
+        search_mem0_episodes_tool()
     ]
 
