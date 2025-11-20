@@ -1,9 +1,6 @@
 """
 MCP Tools - Tour Package Search
 Search tour packages using semantic vector search with embeddings
-
-This tool provides semantic search capabilities for the multi-agent system.
-Used by Recommendation Agent to find relevant tour packages.
 """
 from fastmcp import FastMCP
 from typing import Optional, Dict, Any, List
@@ -13,6 +10,7 @@ import os
 from langchain_openai import OpenAIEmbeddings
 from supabase import create_client, Client
 from src.core.config import settings
+from app.v1.mcp.src.schema import SearchTourPackagesInput
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -210,6 +208,8 @@ class TourPackageSearchService:
 tour_package_search_service = TourPackageSearchService()
 
 
+from pydantic import ValidationError
+
 def register_tour_search_tools(mcp: FastMCP):
     """Register tour package search tools for multi-agent system"""
     
@@ -224,74 +224,35 @@ def register_tour_search_tools(mcp: FastMCP):
         """
         Search for tour packages using semantic vector search.
         
-        This tool uses AI embeddings to find tours that semantically match
-        the user's query. Perfect for multi-agent systems where Recommendation
-        Agent needs to find relevant tours.
-        
-        The search uses:
-        - OpenAI text-embedding-3-small model (1536 dimensions)
-        - Cosine similarity matching
-        - NO FILTERS APPLIED - returns pure semantic matches for agent to decide
-        
-        Args:
-            user_message (str): User's search query in Vietnamese or English.
-                Example: "Tôi muốn đi Đà Lạt", "beach tour", "mountain hiking"
-            max_price (float, optional): IGNORED - parameter kept for compatibility
-            duration (int, optional): IGNORED - parameter kept for compatibility
-            destination (str, optional): IGNORED - parameter kept for compatibility
-            limit (int, optional): Maximum number of results. Default: 2.
-                Example: 2
+        Uses OpenAI embeddings (text-embedding-3-small) with cosine similarity.
+        NO FILTERS APPLIED - returns pure semantic matches for agent to decide.
         
         Returns:
-            Dict with:
+            Dict with found count and list of tour packages with:
             - found (int): Number of packages found
-            - packages (list): List of tour package dictionaries with:
-                - package_id (str): **UUID format** - Use this EXACT value when calling create_booking!
-                - package_name (str): Package name
-                - destination (str): Destination
-                - price (float): Price in VND
-                - duration_days (int): Duration in days
-                - similarity_score (float): Search relevance score (0-1)
-                - available_slots (int): Available slots
-                - start_date (str): Start date
-                - end_date (str): End date
-                - ... (other package fields)
-        
-        Example success response:
-        {
-            "found": 2,
-            "packages": [
-                {
-                    "package_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                    "package_name": "Đà Lạt 3 ngày 2 đêm",
-                    "destination": "Đà Lạt",
-                    "price": 3000000,
-                    "duration_days": 3,
-                    "similarity_score": 0.85,
-                    "available_slots": 10
-                }
-            ]
-        }
-        
-        Example error response:
-        {
-            "found": 0,
-            "packages": [],
-            "error": "Error message",
-            "message": "Error searching tour packages: ..."
-        }
+            - packages (list): Tour dictionaries with package_id, package_name, destination,
+              price, duration_days, similarity_score, available_slots, start_date, image_urls
         """
         try:
+            # Validate inputs
+            validated = SearchTourPackagesInput(
+                user_message=user_message,
+                max_price=max_price,
+                duration=duration,
+                destination=destination,
+                limit=limit
+            )
+            
             logger.info(f"📞 MCP Tool Call: search_tour_packages")
-            logger.info(f"   Query: {user_message[:100]}")
+            logger.info(f"   Query: {validated.user_message[:100]}")
             logger.info(f"   Filters: IGNORED (semantic search only)")
-            logger.info(f"   Limit: {limit}")
+            logger.info(f"   Limit: {validated.limit}")
             
             # Search packages (no filters applied)
             packages = await tour_package_search_service.search_tour_packages(
-                user_message=user_message,
+                user_message=validated.user_message,
                 filters=None,
-                limit=limit
+                limit=validated.limit
             )
             
             result = {
@@ -302,6 +263,12 @@ def register_tour_search_tools(mcp: FastMCP):
             logger.info(f"✅ search_tour_packages completed: {len(packages)} packages found")
             return result
             
+        except ValidationError as e:
+            return {
+                "found": 0,
+                "packages": [],
+                "error": f"Input Validation Error: {str(e)}"
+            }
         except Exception as e:
             logger.error(f"❌ Error in search_tour_packages tool: {str(e)}")
             import traceback

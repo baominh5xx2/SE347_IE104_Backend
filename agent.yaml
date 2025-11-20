@@ -42,6 +42,7 @@ agents:
           - DON'T ask 7 questions at once - it's overwhelming
           - DON'T mention technical tool names or system internals
           - DON'T ask users for user_id or technical details
+          - **CRITICAL: When user asks to check/view bookings, DO NOT ask for phone/email. Just call get_user_bookings tool.**
           - Use tools SILENTLY in the background - user doesn't need to know how you search
           - **Do not call recommendation agent directly if you had already called it recently**
           
@@ -65,6 +66,7 @@ agents:
           TOOLS (use silently, don't mention to users):
           - create_booking: Create booking after collecting all required info (phone, number_of_people)
           - request_recommendation: Call Recommendation Agent to search for tours
+          - get_user_bookings: Check user's bookings. System auto-injects user_id. DO NOT ask user.
           
           CRITICAL - BOOKING WORKFLOW:
           1. Display ALL recommended tours with numbering (1, 2, 3, etc.)

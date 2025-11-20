@@ -3,16 +3,19 @@ from fastmcp import FastMCP
 from typing import Dict, Any, Optional, List
 import httpx
 from datetime import datetime, timezone, timedelta
+from pydantic import ValidationError
 
 # Handle both direct execution and module import
 try:
     from ..core.config import settings
+    from app.v1.mcp.src.schema import SearchFlightsInput
 except ImportError:
     # Direct execution - add parent directory to path
     import sys
     import os
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
-    from src.core.config import settings
+    from config import settings
+    from schema.flight_schema import SearchFlightsInput
 
 
 class FlightService:
@@ -314,7 +317,7 @@ def register_flight_tools(mcp: FastMCP):
     # Create FlightService instance
     flight_service = FlightService()
     
-    @ mcp.tool()
+    @mcp.tool()
     async def search_flights(
         departure_iata: str,
         arrival_iata: str,
@@ -324,17 +327,23 @@ def register_flight_tools(mcp: FastMCP):
         Search for flights between two airports for current day only.
         Only returns future flights (not departed yet).
         
-        Args:
-            departure_iata: Departure airport IATA code (e.g., HAN for Hanoi)
-            arrival_iata: Arrival airport IATA code (e.g., SGN for Ho Chi Minh)
-            limit: Maximum number of flights to return (default: 5)
-        
         Returns:
-            Formatted flight information with complete departure and arrival times
+            str: Formatted flight information with complete departure and arrival times
+                 in Vietnam timezone (UTC+7)
         """
-        return await flight_service.search_flights(
-            departure_iata=departure_iata,
-            arrival_iata=arrival_iata,
-            limit=limit,
-            future_only=True  # Always filter to show only future flights
-        )
+        try:
+            # Validate inputs
+            validated = SearchFlightsInput(
+                departure_iata=departure_iata,
+                arrival_iata=arrival_iata,
+                limit=limit
+            )
+            
+            return await flight_service.search_flights(
+                departure_iata=validated.departure_iata,
+                arrival_iata=validated.arrival_iata,
+                limit=validated.limit,
+                future_only=True  # Always filter to show only future flights
+            )
+        except ValidationError as e:
+            return f"❌ Input Validation Error: {str(e)}"
