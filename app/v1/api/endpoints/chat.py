@@ -43,6 +43,11 @@ async def chat_stream(request: ChatRequest):
                 tour_packages = []
                 metadata = {}
                 
+                # Track MCP UI data and whether tokens have been streamed
+                pending_mcp_ui_resource = None
+                pending_mcp_ui_html = None
+                has_streamed_tokens = False
+                
                 # Stream from LangGraph
                 async for event in supervisor_graph.process_message_stream(
                     user_message=request.message,
@@ -61,6 +66,25 @@ async def chat_stream(request: ChatRequest):
                             }
                             yield f"data: {json.dumps(token_event, ensure_ascii=False)}\n\n"
                             full_response += chunk.content
+                            has_streamed_tokens = True
+                            
+                            # If we have pending MCP UI and now have tokens, send it
+                            if pending_mcp_ui_resource or pending_mcp_ui_html:
+                                if pending_mcp_ui_resource and isinstance(pending_mcp_ui_resource, dict):
+                                    if 'uri' in pending_mcp_ui_resource:
+                                        pending_mcp_ui_resource['uri'] = str(pending_mcp_ui_resource['uri'])
+                                
+                                ui_event = {
+                                    "type": "mcp_ui",
+                                    "ui_resource": pending_mcp_ui_resource,
+                                    "html": pending_mcp_ui_html
+                                }
+                                logger.info(f"📤 Streaming MCP UI event (after tokens): {pending_mcp_ui_resource.get('uri') if pending_mcp_ui_resource else 'HTML only'}")
+                                yield f"data: {json.dumps(ui_event, ensure_ascii=False)}\n\n"
+                                
+                                # Clear pending
+                                pending_mcp_ui_resource = None
+                                pending_mcp_ui_html = None
                     
                     # Track final state
                     elif event_type == "on_chain_end":
@@ -74,6 +98,45 @@ async def chat_stream(request: ChatRequest):
                                 tour_packages = chain_output.get("tour_packages", [])
                             if "metadata" in chain_output:
                                 metadata = chain_output.get("metadata", {})
+                            
+                            # Check for MCP UI Resource updates
+                            mcp_ui_resource = chain_output.get("mcp_ui_resource")
+                            mcp_ui_html = chain_output.get("mcp_ui_html")
+                            
+                            if mcp_ui_resource or mcp_ui_html:
+                                # Convert AnyUrl objects to strings if present in mcp_ui_resource
+                                if mcp_ui_resource and isinstance(mcp_ui_resource, dict):
+                                    if 'uri' in mcp_ui_resource:
+                                        mcp_ui_resource['uri'] = str(mcp_ui_resource['uri'])
+                                
+                                # If tokens have already been streamed, send UI immediately
+                                if has_streamed_tokens:
+                                    ui_event = {
+                                        "type": "mcp_ui",
+                                        "ui_resource": mcp_ui_resource,
+                                        "html": mcp_ui_html
+                                    }
+                                    logger.info(f"📤 Streaming MCP UI event (tokens already streamed): {mcp_ui_resource.get('uri') if mcp_ui_resource else 'HTML only'}")
+                                    yield f"data: {json.dumps(ui_event, ensure_ascii=False)}\n\n"
+                                else:
+                                    # Store for later (will be sent when first token arrives)
+                                    pending_mcp_ui_resource = mcp_ui_resource
+                                    pending_mcp_ui_html = mcp_ui_html
+                                    logger.info(f"⏳ MCP UI pending (waiting for tokens): {mcp_ui_resource.get('uri') if mcp_ui_resource else 'HTML only'}")
+                
+                # If we still have pending MCP UI but no tokens were streamed (edge case), send it at the end
+                if (pending_mcp_ui_resource or pending_mcp_ui_html) and not has_streamed_tokens:
+                    if pending_mcp_ui_resource and isinstance(pending_mcp_ui_resource, dict):
+                        if 'uri' in pending_mcp_ui_resource:
+                            pending_mcp_ui_resource['uri'] = str(pending_mcp_ui_resource['uri'])
+                    
+                    ui_event = {
+                        "type": "mcp_ui",
+                        "ui_resource": pending_mcp_ui_resource,
+                        "html": pending_mcp_ui_html
+                    }
+                    logger.info(f"📤 Streaming MCP UI event (no tokens, sending at end): {pending_mcp_ui_resource.get('uri') if pending_mcp_ui_resource else 'HTML only'}")
+                    yield f"data: {json.dumps(ui_event, ensure_ascii=False)}\n\n"
                 
                 # Send recommendations (full tour packages) if available
                 if recommendations or tour_packages:
