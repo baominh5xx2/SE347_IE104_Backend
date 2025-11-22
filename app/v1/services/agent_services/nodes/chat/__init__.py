@@ -203,20 +203,60 @@ class ChatAgentNodes:
                             tour_packages = state.get("tour_packages", [])
                             recommended_package_ids = [pkg.get("package_id") for pkg in tour_packages if pkg.get("package_id")]
                             
-                            # SMART ID RESOLUTION: Map index/number to real package_id
+                            # === CRITICAL FIX: Auto-inject tour data from state ===
+                            # LLM cannot remember full JSON objects. We MUST inject the data from state.
+                            if tool_name == "generate_tour_ui":
+                                if tour_packages:
+                                    tool_args["packages"] = tour_packages
+                                    logger.info(f"✅ Auto-injected {len(tour_packages)} packages from state into generate_tour_ui tool")
+                                    # Log first package for verification
+                                    if len(tour_packages) > 0:
+                                        pkg = tour_packages[0]
+                                        logger.info(f"   Sample data: {pkg.get('package_name')} | Img: {str(pkg.get('image_urls') or pkg.get('image_url'))[:30]}...")
+                                else:
+                                    logger.warning("⚠️ generate_tour_ui called but NO packages found in state!")
+
+                            # SMART ID RESOLUTION: Map index/number/hallucinated_id to real package_id
                             # If package_id is a small number (e.g. "1", "2") or "tour 1", map it to real ID
                             if package_id and tour_packages:
                                 try:
-                                    # Clean up input (remove "tour", "số", etc)
+                                    # 1. Try index-based mapping (e.g. "1", "tour 1")
                                     clean_id = str(package_id).lower().replace("tour", "").replace("số", "").strip()
                                     if clean_id.isdigit():
                                         idx = int(clean_id) - 1 # 1-based index to 0-based
                                         if 0 <= idx < len(tour_packages):
                                             real_package_id = tour_packages[idx].get("package_id")
                                             if real_package_id:
-                                                logger.info(f"🔄 Smart Resolution: Mapped '{package_id}' -> '{real_package_id}'")
+                                                logger.info(f"🔄 Smart Resolution: Mapped index '{package_id}' -> '{real_package_id}'")
                                                 tool_args["package_id"] = real_package_id
-                                                package_id = real_package_id # Update local var for checks below
+                                                package_id = real_package_id # Update local var
+                                    
+                                    # 2. Try fallback for hallucinated IDs (e.g. "pkg_tour_1", "package_1")
+                                    # If it's NOT a valid UUID and we have packages, default to the first package or try to match
+                                    elif len(str(package_id)) < 30: # UUIDs are 36 chars
+                                        logger.warning(f"⚠️ Detect potential hallucinated ID: '{package_id}'")
+                                        
+                                        # Simple heuristic: if user says "tour 1" or similar, we handled it above.
+                                        # If LLM hallucinated "pkg_tour_1" likely it means the first tour presented.
+                                        if "1" in str(package_id) and len(tour_packages) >= 1:
+                                            real_package_id = tour_packages[0].get("package_id")
+                                            logger.info(f"🔄 Smart Resolution: Mapped hallucinated '{package_id}' -> '{real_package_id}' (First package)")
+                                            tool_args["package_id"] = real_package_id
+                                            package_id = real_package_id
+                                        elif "2" in str(package_id) and len(tour_packages) >= 2:
+                                            real_package_id = tour_packages[1].get("package_id")
+                                            logger.info(f"🔄 Smart Resolution: Mapped hallucinated '{package_id}' -> '{real_package_id}' (Second package)")
+                                            tool_args["package_id"] = real_package_id
+                                            package_id = real_package_id
+                                        else:
+                                            # Ultimate fallback: Use the first package if available
+                                            # This is better than crashing with invalid UUID
+                                            if tour_packages:
+                                                real_package_id = tour_packages[0].get("package_id")
+                                                logger.info(f"🔄 Smart Resolution: Fallback mapped '{package_id}' -> '{real_package_id}' (First available)")
+                                                tool_args["package_id"] = real_package_id
+                                                package_id = real_package_id
+                                                
                                 except Exception as map_err:
                                     logger.warning(f"⚠️ Failed to map package_id '{package_id}': {map_err}")
 
@@ -237,6 +277,27 @@ class ChatAgentNodes:
                                 tool_args,
                                 config={"callbacks": [agent_callback]}
                             )
+                            
+                            # === MCP-UI INTEGRATION ===
+                            # Capture the UI Resource from the tool result
+                            if tool_name == "generate_tour_ui" and isinstance(result, dict):
+                                # Support both legacy HTML and new UI Resource format
+                                html_content = result.get("html")
+                                ui_resource = result.get("ui_resource")
+                                
+                                if ui_resource:
+                                    state["mcp_ui_resource"] = ui_resource
+                                    logger.info(f"✅ Saved MCP UI Resource to state (URI: {ui_resource.get('uri', 'unknown')})")
+                                
+                                if html_content:
+                                    state["mcp_ui_html"] = html_content
+                                    
+                                if ui_resource or html_content:
+                                    result_str = "MCP UI generated successfully. UI Resource ready for client rendering."
+                                else:
+                                    result_str = str(result)
+                            else:
+                                result_str = str(result)
                         except Exception as invoke_error:
                             logger.error(f"CHAT TOOLS: Tool '{tool_name}' failed: {str(invoke_error)}")
                             raise

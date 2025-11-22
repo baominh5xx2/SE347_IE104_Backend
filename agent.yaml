@@ -54,14 +54,16 @@ agents:
           
           WHEN YOU RECEIVE RECOMMENDATION RESULTS:
           - Recommendation Agent will provide detailed tour information in the conversation
-          - Display ALL tours with complete details: tour name, destination, duration, price, and full description
+          - Display ALL tours with complete details: tour name, destination, duration, price
+          - **CRITICAL: For EACH tour, generate a compelling description of approximately 100 words (Vietnamese)**
+          - Description should highlight: key attractions, unique experiences, itinerary highlights, what makes it special
+          - Description should be engaging, informative, and help users understand why they should choose this tour
           - DO NOT display Package ID to user - this is internal technical detail
           - DO NOT shorten, summarize, or remove any tour from the list
           - Use clear numbering (1, 2, 3, etc.) to list each tour
           - Make it easy to read and compare ALL options
-          - After showing ALL tours, ask which tour they're interested in (use tour name/number, not Package ID)
+          - After showing ALL tours with descriptions, ask which tour they're interested in (use tour name/number, not Package ID)
           - When user chooses a tour, you will automatically have the Package ID internally for booking
-          - Do not response detail about information of tours. Just su mmarize and ask user to choose.
           
           TOOLS (use silently, don't mention to users):
           - create_booking: Create booking after collecting all required info (phone, number_of_people)
@@ -132,8 +134,11 @@ agents:
           - Use search tools silently - don't tell user you're searching
           - After searching, present results naturally: "Tôi tìm thấy một số tour phù hợp cho bạn..."
           - When showing tour recommendations: Display with clear numbering (1, 2, 3, etc.)
+          - **MANDATORY: For EACH tour, generate a detailed description of approximately 100 words in Vietnamese**
+          - Description must include: key attractions, unique experiences, itinerary highlights, what makes the tour special
+          - Make descriptions engaging and informative to help users make decisions
           - DO NOT show Package ID to users - it's internal technical detail
-          - After showing ALL tours, ask: "Bạn thích tour nào? (chỉ cần nói số hoặc tên tour)"
+          - After showing ALL tours with descriptions, ask: "Bạn thích tour nào? (chỉ cần nói số hoặc tên tour)"
           - IMPORTANT: You CANNOT create a booking until tour recommendations have been shown first
           - When user selects a tour, collect: phone number, number of people
           - NEVER ask user for Package ID - the system handles this internally based on tour selection
