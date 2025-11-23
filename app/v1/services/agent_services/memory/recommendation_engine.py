@@ -4,7 +4,6 @@ Uses MCP tools for tour recommendations with Mem0 personalization
 """
 from typing import Dict, List, Optional
 import logging
-from app.v1.services.agent_services.memory import conversation_memory
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class RecommendationEngine:
     
     def __init__(self):
         """Initialize recommendation engine"""
-        self.memory = conversation_memory
+        pass  # No longer needs direct memory access - uses MCP tool
     
     async def get_recommendations(self,
                            user_message: str,
@@ -48,18 +47,40 @@ class RecommendationEngine:
             from app.v1.core.logging_config import get_current_agent_callback
             agent_callback = get_current_agent_callback()
             
-            # Search for relevant context using Mem0 semantic search
+            # Search for relevant context using Mem0 via MCP tool
             personalization_context = None
             relevant_memories = []
             
             if user_id:
                 try:
-                    # Use Mem0 to search for relevant conversation context
-                    relevant_memories = await self.memory.search_context(
-                        query=user_message,
+                    # Use MCP tool to search Mem0 for relevant conversation context
+                    # Wrap sync call in asyncio.to_thread to avoid blocking event loop
+                    import asyncio
+                    from app.v1.services.agent_services.tools.mcp_tools import search_mem0_episodes_sync
+                    
+                    # Run sync function in thread pool to avoid blocking async event loop
+                    search_result = await asyncio.to_thread(
+                        search_mem0_episodes_sync,
+                        search_query=user_message,
                         user_id=user_id,
                         limit=2
                     )
+                    
+                    # Parse MCP tool response format
+                    episodes = search_result.get("episodes", [])
+                    if episodes:
+                        # Convert episodes format to memories format
+                        relevant_memories = []
+                        for episode in episodes:
+                            # Extract memory content from episode format
+                            memory_content = episode.get("episode_body", "") or episode.get("memory", "")
+                            if memory_content:
+                                relevant_memories.append({
+                                    "memory": memory_content,
+                                    "content": memory_content,
+                                    "metadata": episode.get("metadata", {}),
+                                    "score": episode.get("score", 0.0)
+                                })
                     
                     if relevant_memories:
                         personalization_context = {
@@ -67,7 +88,7 @@ class RecommendationEngine:
                             "memories": relevant_memories,
                             "has_data": True
                         }
-                        logger.info(f"✅ Found {len(relevant_memories)} relevant memories for personalization")
+                        logger.info(f"✅ Found {len(relevant_memories)} relevant memories via MCP tool for personalization")
                     else:
                         logger.info("📊 No relevant memories found for personalization")
                         personalization_context = {
@@ -76,7 +97,7 @@ class RecommendationEngine:
                             "has_data": False
                         }
                 except Exception as e:
-                    logger.warning(f"⚠️ RECOMMENDATION ENGINE: Could not search memories: {str(e)}")
+                    logger.warning(f"⚠️ RECOMMENDATION ENGINE: Could not search memories via MCP tool: {str(e)}")
                     personalization_context = None
             
             # Build query với personalization context from Mem0
@@ -182,7 +203,9 @@ class RecommendationEngine:
             metadata: Additional metadata (intent, destinations, etc.)
         """
         try:
-            await self.memory.store_episode(
+            # Use conversation_memory directly for storage (not via MCP tool)
+            from app.v1.services.agent_services.memory import conversation_memory
+            await conversation_memory.store_episode(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 user_message=user_message,

@@ -6,7 +6,6 @@ from langchain_core.messages import HumanMessage, AIMessage
 import logging
 from app.v1.services.agent_services.state import AgentState
 from app.v1.services.agent_services.agents import recommendation_agent
-from app.v1.services.agent_services.utils.ui_generator import generate_tour_grid_html
 
 logger = logging.getLogger(__name__)
 
@@ -134,27 +133,31 @@ KHÔNG hỏi về ngày khởi hành - ngày đã được quy định trong pac
             # Debug: Log recommendation message length
             logger.info(f"🎯 RECOMMENDATION NODE: Created recommendation message ({len(recommendation_message)} chars)")
             
-            # === AUTO-GENERATE MCP UI ===
-            # Generate UI directly here instead of relying on LLM to call the tool
+            # === SET TOUR PACKAGES DATA FOR FRONTEND ===
+            # Frontend will render using TourCardComponent - no HTML generation needed
+            # ONLY set mcp_ui_resource when we have packages (recommendation response)
             if packages:
-                try:
-                    logger.info(f"🎨 AUTO-GENERATING MCP UI for {len(packages[:5])} tours...")
-                    html_content = generate_tour_grid_html(packages[:5])
-                    
-                    # Create UIResource object (MCP-UI standard)
-                    ui_resource = {
-                        "uri": f"ui://tour-recommendations/{state.get('conversation_id', 'default')}",
-                        "mimeType": "text/html",
-                        "text": html_content
-                    }
-                    
-                    # Save to state for streaming to frontend
-                    state["mcp_ui_html"] = html_content
-                    state["mcp_ui_resource"] = ui_resource
-                    
-                    logger.info(f"✅ MCP UI generated and saved to state (HTML: {len(html_content)} chars)")
-                except Exception as ui_error:
-                    logger.error(f"⚠️ Failed to auto-generate MCP UI: {ui_error}")
+                # Prepare tour packages data for frontend (limit to 5)
+                tour_packages_for_ui = packages[:5]
+                
+                # Create UIResource object (MCP-UI standard) - but with data instead of HTML
+                # URI must contain "tour-recommendations" to identify as recommendation response
+                ui_resource = {
+                    "uri": f"ui://tour-recommendations/{state.get('conversation_id', 'default')}",
+                    "mimeType": "application/json",
+                    "text": ""  # No HTML, data is in tour_packages
+                }
+                
+                # Save tour packages data to state (frontend will use this to render)
+                # Only set when we have actual recommendations
+                state["mcp_ui_resource"] = ui_resource
+                state["tour_packages"] = tour_packages_for_ui  # Keep for API response
+                
+                logger.info(f"✅ Tour packages data prepared for frontend ({len(tour_packages_for_ui)} tours)")
+            else:
+                # Clear any existing tour packages if no recommendations found
+                state.pop("mcp_ui_resource", None)
+                state.pop("tour_packages", None)
             
             # Clear the recommendation flag so we don't loop back
             state["needs_recommendation"] = False

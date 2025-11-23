@@ -51,10 +51,7 @@ def generate_tour_card_html(package: Dict[str, Any]) -> str:
     # Handle both image_url (singular) and image_urls (plural) fields
     # Check multiple possible field names
     image_urls_str = (
-        package.get("image_urls", "") or 
-        package.get("image_url", "") or
-        package.get("image", "") or
-        ""
+        package.get("image_urls", "") 
     )
     
     description = package.get("description", "")

@@ -9,7 +9,6 @@ import logging
 import json
 from app.v1.core.prompts import prompt_manager
 from app.v1.services.agent_services.state import AgentState
-from app.v1.services.agent_services.memory import conversation_memory
 from app.v1.services.agent_services.tools import get_chat_tools
 from app.v1.core.logging_config import get_current_agent_callback
 
@@ -38,58 +37,21 @@ class ChatAgentNodes:
         """
         LLM node: LLM decides whether to call a tool or respond
         
-        Uses Mem0 for semantic memory search instead of buffer memory
+        Follows standard LangGraph agent pattern - uses state messages only.
+        No external context injection - LLM works with conversation history from state.
         """
         logger.info("🤖 [Chat LLM] Processing...")
         try:
-            conversation_id = state.get("conversation_id", "default_conv")
-            user_id = state.get("user_id", "anonymous_user")
-            
-            # Get current user message for context search
-            current_messages = state.get("messages", [])
-            user_query = ""
-            if current_messages:
-                last_msg = current_messages[-1]
-                if hasattr(last_msg, 'content'):
-                    user_query = last_msg.content
-            
-            # Search Mem0 for relevant context instead of loading all messages
-            relevant_memories = []
-            if user_query:
-                relevant_memories = await conversation_memory.search_context(
-                    query=user_query,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    limit=2
-                )
-            
-            # Prepare system prompt
+            # Get system prompt
             system_prompt = prompt_manager.get_system_prompt('chat_agent')
             
-            # Add Mem0 context if available
-            if relevant_memories:
-                context_str = "\n\nRELEVANT CONTEXT FROM MEMORY:\n"
-                for idx, mem in enumerate(relevant_memories, 1):
-                    memory_content = mem.get("memory", "") or mem.get("content", "")
-                    context_str += f"{idx}. {memory_content}\n"
-                system_prompt += context_str
+            # Get current messages from state (LangGraph checkpointer handles persistence)
+            current_messages = state.get("messages", [])
             
-            # If we have tour packages in state from previous recommendation, inject them
-            tour_packages_in_state = state.get("tour_packages", [])
-            if tour_packages_in_state:
-                packages_str = "\n\n🎯 AVAILABLE TOURS (use these exact package_ids for booking):\n"
-                for idx, pkg in enumerate(tour_packages_in_state[:10], 1):  # Max 10
-                    packages_str += f"{idx}. {pkg.get('package_name', 'Unknown')}\n"
-                    packages_str += f"   📍 {pkg.get('destination', '')} - {pkg.get('duration_days', 0)} ngày\n"
-                    packages_str += f"   💰 {pkg.get('price', 0):,.0f} VNĐ/người\n"
-                    packages_str += f"   🆔 package_id: {pkg.get('package_id', 'N/A')}\n\n"
-                system_prompt += packages_str
-                logger.info(f"✅ Injected {len(tour_packages_in_state)} tours from state into agent context")
-                        
-            # Build messages for LLM
+            # Build messages for LLM - standard LangGraph pattern
             messages = [SystemMessage(content=system_prompt)]
             
-            # Add current state messages
+            # Add all state messages (conversation history)
             if current_messages:
                 for msg in current_messages:
                     if not isinstance(msg, SystemMessage):
