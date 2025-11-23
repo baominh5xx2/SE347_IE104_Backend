@@ -6,7 +6,7 @@ from fastmcp import FastMCP
 from typing import Optional, Dict, Any
 import logging
 
-from src.core.mem0_client import mem0_client
+from app.v1.mcp.src.core.mem0_client import mem0_client
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +57,26 @@ def register_search_personalization_tools(mcp: FastMCP):
                 user_id=user_id,
                 limit=limit
             )
-            # ... implementation ...
-            # For now, just return empty or call service if available
-            # Assuming mem0_client is available in scope or imported
-            from app.v1.core.mem0_client import mem0_client
+            # Use MCP Mem0 client to search memories
+            if not mem0_client.is_available:
+                logger.warning("Mem0 client not available for search_episodes")
+                return {"found": 0, "episodes": []}
             
-            results = await mem0_client.search_memories(
+            # Search memories using MCP Mem0 client
+            results = mem0_client.search(
                 query=validated.search_query,
                 user_id=validated.user_id,
                 limit=validated.limit
             )
-            return {"found": len(results), "episodes": results}
+            
+            # Format results as episodes
+            episodes = []
+            for memory in results:
+                formatted = _format_mem0_episode(memory)
+                episodes.append(formatted)
+            
+            logger.info(f"✅ Found {len(episodes)} episodes for query: {validated.search_query[:50]}...")
+            return {"found": len(episodes), "episodes": episodes}
             
         except ValidationError as e:
             return {"found": 0, "episodes": [], "error": str(e)}
