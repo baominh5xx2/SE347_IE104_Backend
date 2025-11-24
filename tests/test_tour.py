@@ -262,22 +262,25 @@ async def test_create_package_success(tour_service, sample_tour_data, sample_tou
     """Test creating a tour package successfully"""
     service, mock_table = tour_service
     
-    # Mock response
-    mock_execute = Mock()
-    mock_execute.data = [sample_tour_response]
-    mock_table.insert.return_value.execute.return_value = mock_execute
-    
-    # Execute
-    result = await service.create_package(sample_tour_data)
-    
-    # Assertions
-    assert result["EC"] == 0
-    assert result["EM"] == "Tour package created successfully"
-    assert result["package"] is not None
-    assert result["package"]["package_name"] == "Tour Đà Lạt 3N2Đ"
-    
-    # Verify insert was called
-    mock_table.insert.assert_called_once()
+    # Mock embedding generation
+    with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+        with patch.object(service, '_upsert_embedding', return_value=True):
+            # Mock response
+            mock_execute = Mock()
+            mock_execute.data = [sample_tour_response]
+            mock_table.insert.return_value.execute.return_value = mock_execute
+            
+            # Execute
+            result = await service.create_package(sample_tour_data)
+            
+            # Assertions
+            assert result["EC"] == 0
+            assert result["EM"] == "Tour package created successfully"
+            assert result["package"] is not None
+            assert result["package"]["package_name"] == "Tour Đà Lạt 3N2Đ"
+            
+            # Verify insert was called
+            mock_table.insert.assert_called_once()
     
     logger.info("✓ Test create package success passed")
 
@@ -299,17 +302,20 @@ async def test_create_package_with_optional_fields(tour_service):
         "is_active": True
     }
     
-    # Mock response
-    mock_execute = Mock()
-    mock_execute.data = [{**minimal_data, "package_id": str(uuid4()), "created_at": datetime.now().isoformat(), "updated_at": datetime.now().isoformat()}]
-    mock_table.insert.return_value.execute.return_value = mock_execute
-    
-    # Execute
-    result = await service.create_package(minimal_data)
-    
-    # Assertions
-    assert result["EC"] == 0
-    assert result["package"]["package_name"] == "Minimal Tour"
+    # Mock embedding generation
+    with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+        with patch.object(service, '_upsert_embedding', return_value=True):
+            # Mock response
+            mock_execute = Mock()
+            mock_execute.data = [{**minimal_data, "package_id": str(uuid4()), "created_at": datetime.now().isoformat(), "updated_at": datetime.now().isoformat()}]
+            mock_table.insert.return_value.execute.return_value = mock_execute
+            
+            # Execute
+            result = await service.create_package(minimal_data)
+            
+            # Assertions
+            assert result["EC"] == 0
+            assert result["package"]["package_name"] == "Minimal Tour"
     
     logger.info("✓ Test create package with optional fields passed")
 
@@ -374,20 +380,23 @@ async def test_update_package_success(tour_service, sample_tour_response):
         "EM": "Success",
         "package": sample_tour_response
     }):
-        # Mock update response
-        updated_response = {**sample_tour_response, **update_data}
-        mock_execute = Mock()
-        mock_execute.data = [updated_response]
-        mock_table.update.return_value.eq.return_value.execute.return_value = mock_execute
-        
-        # Execute
-        result = await service.update_package(package_id, update_data)
-        
-        # Assertions
-        assert result["EC"] == 0
-        assert result["EM"] == "Tour package updated successfully"
-        assert result["package"]["price"] == 2800000.0
-        assert result["package"]["available_slots"] == 15
+        # Mock embedding generation for content update
+        with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+            with patch.object(service, '_upsert_embedding', return_value=True):
+                # Mock update response
+                updated_response = {**sample_tour_response, **update_data}
+                mock_execute = Mock()
+                mock_execute.data = [updated_response]
+                mock_table.update.return_value.eq.return_value.execute.return_value = mock_execute
+                
+                # Execute
+                result = await service.update_package(package_id, update_data)
+                
+                # Assertions
+                assert result["EC"] == 0
+                assert result["EM"] == "Tour package updated successfully"
+                assert result["package"]["price"] == 2800000.0
+                assert result["package"]["available_slots"] == 15
         
         logger.info("✓ Test update package success passed")
 
@@ -457,19 +466,22 @@ async def test_update_package_partial_update(tour_service, sample_tour_response)
         "EM": "Success",
         "package": sample_tour_response
     }):
-        # Mock update response
-        updated_response = {**sample_tour_response, **update_data}
-        mock_execute = Mock()
-        mock_execute.data = [updated_response]
-        mock_table.update.return_value.eq.return_value.execute.return_value = mock_execute
-        
-        # Execute
-        result = await service.update_package(package_id, update_data)
-        
-        # Assertions
-        assert result["EC"] == 0
-        assert result["package"]["suitable_for"] == "Gia đình VIP, Cặp đôi cao cấp"
-        assert "https://new.com/img3.jpg" in result["package"]["image_urls"]
+        # Mock embedding generation for content update (suitable_for is a content field)
+        with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+            with patch.object(service, '_upsert_embedding', return_value=True):
+                # Mock update response
+                updated_response = {**sample_tour_response, **update_data}
+                mock_execute = Mock()
+                mock_execute.data = [updated_response]
+                mock_table.update.return_value.eq.return_value.execute.return_value = mock_execute
+                
+                # Execute
+                result = await service.update_package(package_id, update_data)
+                
+                # Assertions
+                assert result["EC"] == 0
+                assert result["package"]["suitable_for"] == "Gia đình VIP, Cặp đôi cao cấp"
+                assert "https://new.com/img3.jpg" in result["package"]["image_urls"]
         
         logger.info("✓ Test update package partial passed")
 
@@ -516,20 +528,22 @@ async def test_delete_package_success(tour_service, sample_tour_response):
         "EM": "Success",
         "package": sample_tour_response
     }):
-        # Mock delete response
-        mock_execute = Mock()
-        mock_execute.data = [sample_tour_response]
-        mock_table.delete.return_value.eq.return_value.execute.return_value = mock_execute
-        
-        # Execute
-        result = await service.delete_package(package_id)
-        
-        # Assertions
-        assert result["EC"] == 0
-        assert result["EM"] == "Tour package deleted successfully"
-        
-        # Verify delete was called
-        mock_table.delete.assert_called_once()
+        # Mock embedding deletion
+        with patch.object(service, '_delete_embedding', return_value=True):
+            # Mock delete response
+            mock_execute = Mock()
+            mock_execute.data = [sample_tour_response]
+            mock_table.delete.return_value.eq.return_value.execute.return_value = mock_execute
+            
+            # Execute
+            result = await service.delete_package(package_id)
+            
+            # Assertions
+            assert result["EC"] == 0
+            assert result["EM"] == "Tour package deleted successfully"
+            
+            # Verify delete was called
+            mock_table.delete.assert_called_once()
         
         logger.info("✓ Test delete package success passed")
 
@@ -722,18 +736,21 @@ async def test_create_package_with_multiple_images(tour_service):
         "is_active": True
     }
     
-    # Mock response
-    mock_execute = Mock()
-    mock_execute.data = [{**data, "package_id": str(uuid4()), "created_at": datetime.now().isoformat(), "updated_at": datetime.now().isoformat()}]
-    mock_table.insert.return_value.execute.return_value = mock_execute
-    
-    # Execute
-    result = await service.create_package(data)
-    
-    # Assertions
-    assert result["EC"] == 0
-    assert "|" in result["package"]["image_urls"]
-    assert result["package"]["image_urls"].count("|") == 3  # 4 images = 3 separators
+    # Mock embedding generation
+    with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+        with patch.object(service, '_upsert_embedding', return_value=True):
+            # Mock response
+            mock_execute = Mock()
+            mock_execute.data = [{**data, "package_id": str(uuid4()), "created_at": datetime.now().isoformat(), "updated_at": datetime.now().isoformat()}]
+            mock_table.insert.return_value.execute.return_value = mock_execute
+            
+            # Execute
+            result = await service.create_package(data)
+            
+            # Assertions
+            assert result["EC"] == 0
+            assert "|" in result["package"]["image_urls"]
+            assert result["package"]["image_urls"].count("|") == 3  # 4 images = 3 separators
     
     logger.info("✓ Test create package with multiple images passed")
 
@@ -857,17 +874,20 @@ async def test_create_package_with_long_description(tour_service):
         "is_active": True
     }
     
-    # Mock response
-    mock_execute = Mock()
-    mock_execute.data = [{**data, "package_id": str(uuid4()), "created_at": datetime.now().isoformat(), "updated_at": datetime.now().isoformat()}]
-    mock_table.insert.return_value.execute.return_value = mock_execute
-    
-    # Execute
-    result = await service.create_package(data)
-    
-    # Assertions
-    assert result["EC"] == 0
-    assert len(result["package"]["description"]) > 1000
+    # Mock embedding generation
+    with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+        with patch.object(service, '_upsert_embedding', return_value=True):
+            # Mock response
+            mock_execute = Mock()
+            mock_execute.data = [{**data, "package_id": str(uuid4()), "created_at": datetime.now().isoformat(), "updated_at": datetime.now().isoformat()}]
+            mock_table.insert.return_value.execute.return_value = mock_execute
+            
+            # Execute
+            result = await service.create_package(data)
+            
+            # Assertions
+            assert result["EC"] == 0
+            assert len(result["package"]["description"]) > 1000
     
     logger.info("✓ Test create with long description passed")
 
@@ -885,6 +905,7 @@ async def test_update_package_dates(tour_service, sample_tour_response):
         "EM": "Success",
         "package": sample_tour_response
     }):
+        # Dates don't trigger embedding regeneration, so no need to mock embedding methods
         # Mock update response
         updated_response = {
             **sample_tour_response,
