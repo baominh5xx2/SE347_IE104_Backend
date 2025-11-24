@@ -9,8 +9,8 @@ import numpy as np
 import os
 from langchain_openai import OpenAIEmbeddings
 from supabase import create_client, Client
-from src.core.config import settings
-from app.v1.mcp.src.schema import SearchTourPackagesInput
+from ..core.config import settings
+from ..schema import SearchTourPackagesInput
 from dotenv import load_dotenv
 
 load_dotenv()

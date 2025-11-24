@@ -9,7 +9,7 @@ import logging
 
 from app.v1.services.tour_package_service import TourPackageService
 from app.v1.api.endpoints.tour_packages import search_tour_packages
-from app.v1.schema.tour_package_schema import TourPackageSearchResponse
+from app.v1.schema.tour_package_schema import TourPackageSearchRequest, TourPackageSearchResponse
 
 # Setup logging for tests
 logging.basicConfig(
@@ -225,9 +225,9 @@ class TestSearchTourPackagesEndpoint:
         })
         service.search_packages = mock_search
         
+        request = TourPackageSearchRequest(q="Tôi muốn đi Đà Lạt", limit=10)
         response = await search_tour_packages(
-            q="Tôi muốn đi Đà Lạt",
-            limit=10,
+            request=request,
             service=service
         )
         
@@ -256,24 +256,27 @@ class TestSearchTourPackagesEndpoint:
         })
         service.search_packages = mock_search
         
-        response = await search_tour_packages(
+        request = TourPackageSearchRequest(
             q="Tour Đà Lạt",
             max_price=3000000.0,
             duration=3,
             destination="Đà Lạt",
-            limit=5,
+            limit=5
+        )
+        response = await search_tour_packages(
+            request=request,
             service=service
         )
         
         assert response.EC == 0
         assert response.found == 1
         mock_search.assert_called_once()
-        call_args = mock_search.call_args
-        assert call_args[1]["user_message"] == "Tour Đà Lạt"
-        assert call_args[1]["max_price"] == 3000000.0
-        assert call_args[1]["duration"] == 3
-        assert call_args[1]["destination"] == "Đà Lạt"
-        assert call_args[1]["limit"] == 5
+        call_kwargs = mock_search.call_args.kwargs
+        assert call_kwargs["user_message"] == "Tour Đà Lạt"
+        assert call_kwargs["max_price"] == 3000000.0
+        assert call_kwargs["duration"] == 3
+        assert call_kwargs["destination"] == "Đà Lạt"
+        assert call_kwargs["limit"] == 5
     
     @pytest.mark.asyncio
     async def test_endpoint_search_no_results(self, tour_package_service):
@@ -289,9 +292,9 @@ class TestSearchTourPackagesEndpoint:
         })
         service.search_packages = mock_search
         
+        request = TourPackageSearchRequest(q="Tour không tồn tại", limit=10)
         response = await search_tour_packages(
-            q="Tour không tồn tại",
-            limit=10,
+            request=request,
             service=service
         )
         
@@ -308,10 +311,10 @@ class TestSearchTourPackagesEndpoint:
         mock_search = AsyncMock(side_effect=Exception("Database connection error"))
         service.search_packages = mock_search
         
+        request = TourPackageSearchRequest(q="Tôi muốn đi Đà Lạt", limit=10)
         with pytest.raises(HTTPException) as exc_info:
             await search_tour_packages(
-                q="Tôi muốn đi Đà Lạt",
-                limit=10,
+                request=request,
                 service=service
             )
         
@@ -334,9 +337,9 @@ class TestSearchTourPackagesEndpoint:
         service.search_packages = mock_search
         
         # Test limit bounds (should be validated by FastAPI)
+        request = TourPackageSearchRequest(q="Test query", limit=50)  # Max allowed
         response = await search_tour_packages(
-            q="Test query",
-            limit=50,  # Max allowed
+            request=request,
             service=service
         )
         
@@ -382,10 +385,9 @@ class TestSearchIntegration:
             mock_service = AsyncMock(return_value=service_result)
             service.search_packages = mock_service
             
+            request = TourPackageSearchRequest(q="Đà Lạt", max_price=3000000.0, limit=10)
             response = await search_tour_packages(
-                q="Đà Lạt",
-                max_price=3000000.0,
-                limit=10,
+                request=request,
                 service=service
             )
             
