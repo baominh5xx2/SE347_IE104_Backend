@@ -13,7 +13,8 @@ from ...schema.tour_package_schema import (
     TourPackageDetailResponse,
     TourPackageCreateResponse,
     TourPackageUpdateResponse,
-    TourPackageDeleteResponse
+    TourPackageDeleteResponse,
+    TourPackageSearchResponse
 )
 from ...services.tour_package_service import TourPackageService
 from ...core.supabase import get_supabase_client
@@ -27,6 +28,54 @@ def get_tour_package_service():
     """Dependency to get TourPackageService instance"""
     supabase = get_supabase_client()
     return TourPackageService(supabase)
+
+
+@router.get("/search", response_model=TourPackageSearchResponse)
+async def search_tour_packages(
+    q: str = Query(..., description="Từ khóa tìm kiếm (ví dụ: 'Tôi muốn đi Đà Lạt')"),
+    max_price: Optional[float] = Query(None, ge=0, description="Giá tối đa (VND)"),
+    duration: Optional[int] = Query(None, ge=1, le=30, description="Số ngày tour"),
+    destination: Optional[str] = Query(None, description="Lọc theo điểm đến"),
+    limit: int = Query(10, ge=1, le=50, description="Số lượng kết quả"),
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Tìm kiếm tour packages sử dụng hybrid search (semantic + keyword + filters)
+    
+    Sử dụng:
+    - Semantic search: Supabase native pgvector search (text-embedding-3-small)
+    - Keyword search: PostgreSQL full-text search trên package_name, destination, description
+    - Filters: Database-level filters cho price, duration, destination
+    - Scoring: Weighted combination (0.7 semantic + 0.3 keyword)
+    
+    Args:
+        q: Từ khóa tìm kiếm (bắt buộc)
+        max_price: Giá tối đa (VND)
+        duration: Số ngày tour
+        destination: Lọc theo điểm đến
+        limit: Số lượng kết quả (1-50)
+        service: Tour package service instance
+        
+    Returns:
+        TourPackageSearchResponse với danh sách tour packages và scores
+        
+    Example:
+        GET /api/v1/tour-packages/search?q=Tôi muốn đi Đà Lạt&max_price=3000000&limit=10
+        GET /api/v1/tour-packages/search?q=beach tour&duration=3
+    """
+    try:
+        result = await service.search_packages(
+            user_message=q,
+            max_price=max_price,
+            duration=duration,
+            destination=destination,
+            limit=limit
+        )
+        return TourPackageSearchResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error in search_tour_packages endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/", response_model=TourPackageListResponse)

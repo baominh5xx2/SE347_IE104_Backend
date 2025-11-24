@@ -54,8 +54,7 @@ class TourPackageResponse(TourPackageBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class TourPackageListResponse(BaseModel):
@@ -91,3 +90,11 @@ class TourPackageDeleteResponse(BaseModel):
     """Schema for delete tour package response"""
     EC: int = Field(0, description="Error code (0 = success)")
     EM: str = Field("Success", description="Error message")
+
+
+class TourPackageSearchResponse(BaseModel):
+    """Schema for search tour packages response"""
+    EC: int = Field(0, description="Error code (0 = success)")
+    EM: str = Field("Success", description="Error message")
+    found: int = Field(..., description="Số lượng tour packages tìm thấy")
+    packages: List[dict] = Field(..., description="Danh sách tour packages với scores")
