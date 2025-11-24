@@ -8,6 +8,13 @@ from datetime import datetime, timezone
 from uuid import UUID
 from supabase import Client
 
+# Import search service from MCP tools
+try:
+    from ...mcp.src.tools.tour_search_tools import tour_package_search_service
+except ImportError:
+    tour_package_search_service = None
+    logging.warning("TourPackageSearchService not available - search functionality disabled")
+
 logger = logging.getLogger(__name__)
 
 
@@ -251,4 +258,66 @@ class TourPackageService:
             return {
                 "EC": 2,
                 "EM": f"Error deleting tour package: {str(e)}"
+            }
+    
+    async def search_packages(
+        self,
+        user_message: str,
+        max_price: Optional[float] = None,
+        duration: Optional[int] = None,
+        destination: Optional[str] = None,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Search tour packages using hybrid search (semantic + keyword + filters)
+        
+        Args:
+            user_message: User query (e.g., "Tôi muốn đi Đà Lạt")
+            max_price: Maximum price filter
+            duration: Duration filter in days
+            destination: Destination filter
+            limit: Number of results
+            
+        Returns:
+            Dict with EC, EM, found, and packages list
+        """
+        try:
+            if not tour_package_search_service:
+                return {
+                    "EC": 1,
+                    "EM": "Search service not available",
+                    "found": 0,
+                    "packages": []
+                }
+            
+            # Build filters dict
+            filters = {}
+            if max_price is not None:
+                filters["max_price"] = max_price
+            if duration is not None:
+                filters["duration"] = duration
+            if destination:
+                filters["destination"] = destination
+            
+            # Call search service
+            packages = await tour_package_search_service.search_tour_packages(
+                user_message=user_message,
+                filters=filters if filters else None,
+                limit=limit
+            )
+            
+            return {
+                "EC": 0,
+                "EM": "Successfully searched tour packages",
+                "found": len(packages),
+                "packages": packages
+            }
+            
+        except Exception as e:
+            logger.error(f"Error searching tour packages: {str(e)}")
+            return {
+                "EC": 1,
+                "EM": f"Error searching tour packages: {str(e)}",
+                "found": 0,
+                "packages": []
             }
