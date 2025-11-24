@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS tour_packages (
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     image_urls TEXT, -- URL hình ảnh phân cách bằng |
-    cuisine VARCHAR(500), -- Ẩm thực
-    suitable_for VARCHAR(500), -- Phù hợp cho
+    cuisine TEXT, -- Ẩm thực
+    suitable_for TEXT, -- Phù hợp cho
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -146,7 +146,7 @@ CREATE OR REPLACE FUNCTION search_tour_packages(
 RETURNS TABLE (
     package_id UUID, package_name VARCHAR, destination VARCHAR, 
     price DECIMAL, duration_days INTEGER, available_slots INTEGER,
-    start_date DATE, image_urls TEXT, cuisine VARCHAR, suitable_for VARCHAR
+    start_date DATE, image_urls TEXT, cuisine TEXT, suitable_for TEXT
 ) AS $$
 BEGIN
     RETURN QUERY
