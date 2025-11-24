@@ -12,7 +12,7 @@ class SearchTourPackagesInput(BaseModel):
     max_price: Optional[float] = Field(default=None, ge=0, description="IGNORED - kept for compatibility. Max price filter in VND")
     duration: Optional[int] = Field(default=None, ge=1, le=30, description="IGNORED - kept for compatibility. Duration filter in days")
     destination: Optional[str] = Field(default=None, description="IGNORED - kept for compatibility. Destination filter")
-    limit: int = Field(default=10, ge=1, le=50, description="Maximum number of results (1-50)")
+    limit: int = Field(default=5, ge=1, le=50, description="Maximum number of results (1-50)")
 
 
 class RequestRecommendationInput(BaseModel):

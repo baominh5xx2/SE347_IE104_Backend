@@ -10,10 +10,17 @@ from supabase import Client
 
 # Import search service from MCP tools
 try:
-    from ...mcp.src.tools.tour_search_tools import tour_package_search_service
+    from ..mcp.src.tools.tour_search_tools import tour_package_search_service
 except ImportError:
     tour_package_search_service = None
     logging.warning("TourPackageSearchService not available - search functionality disabled")
+
+# Import mem0 client for user preferences
+try:
+    from ..core.mem0_client import mem0_client
+except ImportError:
+    mem0_client = None
+    logging.warning("Mem0 client not available - personalization disabled")
 
 logger = logging.getLogger(__name__)
 
@@ -306,11 +313,17 @@ class TourPackageService:
                 limit=limit
             )
             
+            # Filter out description from packages (keep other fields)
+            filtered_packages = []
+            for pkg in packages:
+                pkg_copy = {k: v for k, v in pkg.items() if k != 'description'}
+                filtered_packages.append(pkg_copy)
+            
             return {
                 "EC": 0,
                 "EM": "Successfully searched tour packages",
-                "found": len(packages),
-                "packages": packages
+                "found": len(filtered_packages),
+                "packages": filtered_packages
             }
             
         except Exception as e:
@@ -318,6 +331,176 @@ class TourPackageService:
             return {
                 "EC": 1,
                 "EM": f"Error searching tour packages: {str(e)}",
+                "found": 0,
+                "packages": []
+            }
+    
+    async def recommend_packages(
+        self,
+        user_id: str,
+        k: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Recommend tour packages dựa trên tour gần hết hạn và đặc điểm user từ Mem0
+        
+        Logic:
+        1. Tìm 10 tour gần hết hạn nhất (end_date gần nhất, is_active=True, available_slots > 0)
+        2. Lấy đặc điểm user từ Mem0 (preferences, lịch sử tìm kiếm)
+        3. Dùng hybrid search để tìm k tour phù hợp nhất từ 10 tour gần hết hạn
+        
+        Args:
+            user_id: User ID để lấy đặc điểm từ Mem0
+            k: Số lượng tour được recommend (1-10)
+            
+        Returns:
+            Dict with EC, EM, found, and packages list
+        """
+        try:
+            from datetime import datetime, timezone
+            
+            # Step 1: Tìm 10 tour gần hết hạn nhất
+            now = datetime.now(timezone.utc).isoformat()
+            
+            # Query tours: is_active=True, available_slots > 0, end_date >= now, order by end_date ASC
+            query = self.supabase.table('tour_packages').select('*')
+            query = query.eq('is_active', True)
+            query = query.gt('available_slots', 0)
+            query = query.gte('end_date', now)  # Chỉ lấy tour chưa hết hạn
+            query = query.order('end_date', desc=False)  # Sắp xếp theo end_date tăng dần (gần hết hạn nhất trước)
+            query = query.limit(10)
+            
+            result = query.execute()
+            expiring_tours = result.data if result.data else []
+            
+            if not expiring_tours:
+                return {
+                    "EC": 0,
+                    "EM": "No expiring tours available",
+                    "found": 0,
+                    "packages": []
+                }
+            
+            # Step 2: Lấy đặc điểm user từ Mem0
+            user_preferences = ""
+            if mem0_client and mem0_client.is_available:
+                try:
+                    logger.info(f"📚 Fetching user preferences from Mem0 for user {user_id}")
+                    # Search mem0 for user preferences about tours, travel, destinations
+                    memories = mem0_client.search(
+                        query="tour travel destination preferences budget duration",
+                        user_id=user_id,
+                        limit=5
+                    )
+                    
+                    if memories:
+                        # Extract preferences from memories
+                        preference_texts = []
+                        for mem in memories:
+                            content = mem.get('memory', '') or mem.get('content', '') or mem.get('text', '')
+                            if content:
+                                preference_texts.append(content)  # Limit length
+                        
+                        if preference_texts:
+                            user_preferences = ". ".join(preference_texts)
+                except Exception as e:
+                    logger.warning(f"⚠️ Error fetching user preferences from Mem0: {str(e)}")
+                    user_preferences = ""
+            else:
+                logger.info("Mem0 client not available, skipping personalization")
+            
+            # Step 3: Dùng search tool để tìm k tour phù hợp từ 10 tour gần hết hạn
+            if not tour_package_search_service:
+                # Fallback: return expiring tours directly
+                logger.warning("Search service not available, returning expiring tours directly")
+                return {
+                    "EC": 0,
+                    "EM": "Successfully retrieved expiring tours",
+                    "found": min(k, len(expiring_tours)),
+                    "packages": expiring_tours[:k]
+                }
+            
+            # Build search query từ user preferences
+            if user_preferences:
+                search_query = f"Dựa trên sở thích: {user_preferences}. Tìm tour phù hợp"
+            else:
+                search_query = "Tìm tour du lịch phù hợp"
+            
+            logger.info(f"🔍 Searching for {k} recommended tours from {len(expiring_tours)} expiring tours")
+            
+            # Get package IDs from expiring tours
+            expiring_package_ids = [str(tour.get('package_id', '')) for tour in expiring_tours if tour.get('package_id')]
+            
+            # Search với search service - nhưng cần filter để chỉ lấy từ expiring tours
+            # Vì search service không hỗ trợ filter by package_ids trực tiếp,
+            # ta sẽ search và filter kết quả sau
+            all_packages = await tour_package_search_service.search_tour_packages(
+                user_message=search_query,
+                filters=None,
+                limit=20  # Get more to filter
+            )
+            
+            # Filter để chỉ lấy packages trong expiring_tours
+            recommended_packages = []
+            expiring_ids_set = set(expiring_package_ids)
+            
+            # Tạo map từ package_id -> tour data để merge scores với tour data
+            expiring_tours_map = {str(tour.get('package_id', '')): tour for tour in expiring_tours}
+            
+            for pkg in all_packages:
+                pkg_id = str(pkg.get('package_id', ''))
+                if pkg_id in expiring_ids_set:
+                    # Merge search result với tour data từ expiring_tours
+                    tour_data = expiring_tours_map.get(pkg_id, {})
+                    # Keep search scores but ensure all tour fields are present
+                    merged_pkg = {**tour_data, **pkg}
+                    recommended_packages.append(merged_pkg)
+                    if len(recommended_packages) >= k:
+                        break
+            
+            # Nếu không đủ k tour từ search, thêm từ expiring_tours (theo thứ tự gần hết hạn)
+            if len(recommended_packages) < k:
+                recommended_ids = {str(p.get('package_id', '')) for p in recommended_packages}
+                for tour in expiring_tours:
+                    tour_id = str(tour.get('package_id', ''))
+                    if tour_id not in recommended_ids:
+                        # Add default scores
+                        tour_copy = tour.copy()
+                        tour_copy['final_score'] = 0.5
+                        tour_copy['semantic_score'] = 0.5
+                        tour_copy['keyword_score'] = 0.0
+                        recommended_packages.append(tour_copy)
+                        if len(recommended_packages) >= k:
+                            break
+            
+            # Sort by final_score if available, then by end_date
+            recommended_packages.sort(
+                key=lambda x: (x.get('final_score', 0), x.get('end_date', '')),
+                reverse=True
+            )
+            recommended_packages = recommended_packages[:k]
+            
+            # Filter out description from packages (keep other fields)
+            filtered_packages = []
+            for pkg in recommended_packages:
+                pkg_copy = {k: v for k, v in pkg.items() if k != 'description'}
+                filtered_packages.append(pkg_copy)
+            
+            logger.info(f"✅ Recommended {len(filtered_packages)} tours for user {user_id}")
+            
+            return {
+                "EC": 0,
+                "EM": "Successfully recommended tour packages",
+                "found": len(filtered_packages),
+                "packages": filtered_packages
+            }
+            
+        except Exception as e:
+            logger.error(f"Error recommending tour packages: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "EC": 1,
+                "EM": f"Error recommending tour packages: {str(e)}",
                 "found": 0,
                 "packages": []
             }

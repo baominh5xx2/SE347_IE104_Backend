@@ -14,6 +14,8 @@ from ...schema.tour_package_schema import (
     TourPackageCreateResponse,
     TourPackageUpdateResponse,
     TourPackageDeleteResponse,
+    TourPackageSearchRequest,
+    TourPackageRecommendRequest,
     TourPackageSearchResponse
 )
 from ...services.tour_package_service import TourPackageService
@@ -30,13 +32,49 @@ def get_tour_package_service():
     return TourPackageService(supabase)
 
 
-@router.get("/search", response_model=TourPackageSearchResponse)
+@router.post("/recommend", response_model=TourPackageSearchResponse)
+async def recommend_tour_packages(
+    request: TourPackageRecommendRequest,
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Recommend tour packages dựa trên tour gần hết hạn và đặc điểm user từ Mem0
+    
+    Logic:
+    1. Tìm 10 tour gần hết hạn nhất (dựa vào end_date)
+    2. Lấy đặc điểm user từ Mem0 (preferences, lịch sử tìm kiếm)
+    3. Dùng hybrid search để tìm k tour phù hợp nhất từ 10 tour gần hết hạn
+    
+    Args:
+        request: TourPackageRecommendRequest với user_id và k
+        service: Tour package service instance
+        
+    Returns:
+        TourPackageSearchResponse với danh sách k tour được recommend
+        
+    Example:
+        POST /api/v1/tour-packages/recommend
+        Body:
+        {
+            "user_id": "user123",
+            "k": 5
+        }
+    """
+    try:
+        result = await service.recommend_packages(
+            user_id=request.user_id,
+            k=request.k
+        )
+        return TourPackageSearchResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error in recommend_tour_packages endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/search", response_model=TourPackageSearchResponse)
 async def search_tour_packages(
-    q: str = Query(..., description="Từ khóa tìm kiếm (ví dụ: 'Tôi muốn đi Đà Lạt')"),
-    max_price: Optional[float] = Query(None, ge=0, description="Giá tối đa (VND)"),
-    duration: Optional[int] = Query(None, ge=1, le=30, description="Số ngày tour"),
-    destination: Optional[str] = Query(None, description="Lọc theo điểm đến"),
-    limit: int = Query(10, ge=1, le=50, description="Số lượng kết quả"),
+    request: TourPackageSearchRequest,
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
@@ -49,27 +87,28 @@ async def search_tour_packages(
     - Scoring: Weighted combination (0.7 semantic + 0.3 keyword)
     
     Args:
-        q: Từ khóa tìm kiếm (bắt buộc)
-        max_price: Giá tối đa (VND)
-        duration: Số ngày tour
-        destination: Lọc theo điểm đến
-        limit: Số lượng kết quả (1-50)
+        request: TourPackageSearchRequest với query và filters
         service: Tour package service instance
         
     Returns:
         TourPackageSearchResponse với danh sách tour packages và scores
         
     Example:
-        GET /api/v1/tour-packages/search?q=Tôi muốn đi Đà Lạt&max_price=3000000&limit=10
-        GET /api/v1/tour-packages/search?q=beach tour&duration=3
+        POST /api/v1/tour-packages/search
+        Body:
+        {
+            "q": "Tôi muốn đi Đà Lạt",
+            "max_price": 3000000,
+            "limit": 10
+        }
     """
     try:
         result = await service.search_packages(
-            user_message=q,
-            max_price=max_price,
-            duration=duration,
-            destination=destination,
-            limit=limit
+            user_message=request.q,
+            max_price=request.max_price,
+            duration=request.duration,
+            destination=request.destination,
+            limit=request.limit
         )
         return TourPackageSearchResponse(**result)
         
