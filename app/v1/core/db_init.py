@@ -26,13 +26,11 @@ CREATE TABLE IF NOT EXISTS tour_packages (
     duration_days INTEGER NOT NULL,
     price DECIMAL(12, 2) NOT NULL,
     available_slots INTEGER NOT NULL,
-    departure_location VARCHAR(255) NOT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    includes TEXT[] NOT NULL,
-    excludes TEXT[],
-    itinerary JSONB,
-    image_url VARCHAR(500),
+    image_urls TEXT,
+    cuisine VARCHAR(500),
+    suitable_for VARCHAR(500),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -42,7 +40,6 @@ CREATE TABLE IF NOT EXISTS tour_packages (
 CREATE INDEX IF NOT EXISTS idx_packages_destination ON tour_packages(destination);
 CREATE INDEX IF NOT EXISTS idx_packages_dates ON tour_packages(start_date, end_date);
 CREATE INDEX IF NOT EXISTS idx_packages_active ON tour_packages(is_active);
-CREATE INDEX IF NOT EXISTS idx_packages_gin ON tour_packages USING GIN(includes);
 
 -- Package Embeddings Table
 CREATE TABLE IF NOT EXISTS package_embeddings (
@@ -131,13 +128,13 @@ CREATE OR REPLACE FUNCTION search_tour_packages(
 RETURNS TABLE (
     package_id UUID, package_name VARCHAR, destination VARCHAR, 
     price DECIMAL, duration_days INTEGER, available_slots INTEGER,
-    start_date DATE, includes TEXT[]
+    start_date DATE, image_urls TEXT, cuisine VARCHAR, suitable_for VARCHAR
 ) AS $$
 BEGIN
     RETURN QUERY
     SELECT 
         tp.package_id, tp.package_name, tp.destination, tp.price,
-        tp.duration_days, tp.available_slots, tp.start_date, tp.includes
+        tp.duration_days, tp.available_slots, tp.start_date, tp.image_urls, tp.cuisine, tp.suitable_for
     FROM tour_packages tp
     WHERE tp.is_active = TRUE
         AND tp.available_slots > 0

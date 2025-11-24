@@ -241,19 +241,11 @@ GET /api/v1/tour-packages/?is_active=true&destination=Hà Nội&limit=5&offset=0
       "duration_days": 2,
       "price": 3200000.0,
       "available_slots": 10000,
-      "departure_location": "Hà Nội",
       "start_date": "2025-11-22",
       "end_date": "2025-11-23",
-      "includes": ["Xe ô tô", "Khách sạn 3 sao", "Ăn sáng buffet"],
-      "excludes": ["Đồ uống ngoài bữa ăn", "Chi phí cá nhân"],
-      "itinerary": {
-        "day1": {
-          "title": "HÀ NỘI - TRÀNG AN",
-          "morning": "07:00 - Khởi hành...",
-          "afternoon": "14:00 - Tham quan..."
-        }
-      },
-      "image_url": "https://images.example.com/ninhbinh.jpg",
+      "image_urls": "https://images.example.com/ninhbinh1.jpg|https://images.example.com/ninhbinh2.jpg",
+      "cuisine": "Ẩm thực miền Bắc",
+      "suitable_for": "Gia đình, Cặp đôi",
       "is_active": true,
       "created_at": "2025-10-15T16:45:34.445637",
       "updated_at": "2025-10-15T16:45:34.445637"
@@ -294,16 +286,11 @@ GET /api/v1/tour-packages/fe5d44aa-5435-4110-a2d2-947f716f0ebc
     "duration_days": 2,
     "price": 3200000.0,
     "available_slots": 10000,
-    "departure_location": "Hà Nội",
     "start_date": "2025-11-22",
     "end_date": "2025-11-23",
-    "includes": ["Xe ô tô đời mới", "Khách sạn 3 sao", "Ăn sáng buffet"],
-    "excludes": ["Đồ uống ngoài bữa ăn", "Chi phí cá nhân"],
-    "itinerary": {
-      "day1": {...},
-      "day2": {...}
-    },
-    "image_url": "https://images.example.com/ninhbinh.jpg",
+    "image_urls": "https://images.example.com/ninhbinh1.jpg|https://images.example.com/ninhbinh2.jpg|https://images.example.com/ninhbinh3.jpg",
+    "cuisine": "Ẩm thực miền Bắc, Cơm cháy chả cá",
+    "suitable_for": "Gia đình, Cặp đôi, Nhóm bạn",
     "is_active": true,
     "created_at": "2025-10-15T16:45:34.445637",
     "updated_at": "2025-10-15T16:45:34.445637"
@@ -328,7 +315,7 @@ Tạo mới một tour package.
 Content-Type: application/json
 ```
 
-**Request Body (All fields required except excludes, itinerary, image_url):**
+**Request Body (All fields required except image_urls, cuisine, suitable_for):**
 ```json
 {
   "package_name": "Tour Đà Lạt 3N2Đ",
@@ -337,37 +324,11 @@ Content-Type: application/json
   "duration_days": 3,
   "price": 2500000,
   "available_slots": 20,
-  "departure_location": "TP.HCM",
   "start_date": "2024-12-01",
   "end_date": "2024-12-03",
-  "includes": [
-    "Khách sạn 4 sao",
-    "Ăn 3 bữa/ngày",
-    "Hướng dẫn viên"
-  ],
-  "excludes": [
-    "Vé máy bay",
-    "Chi phí cá nhân"
-  ],
-  "itinerary": {
-    "day1": {
-      "title": "TP.HCM - Đà Lạt",
-      "morning": "Khởi hành từ TP.HCM",
-      "afternoon": "Tham quan hồ Xuân Hương",
-      "evening": "Khám phá chợ đêm"
-    },
-    "day2": {
-      "title": "Thác Datanla - Hồ Tuyền Lâm",
-      "morning": "Tham quan thác Datanla",
-      "afternoon": "Đi cáp treo hồ Tuyền Lâm"
-    },
-    "day3": {
-      "title": "Về TP.HCM",
-      "morning": "Mua sắm đặc sản",
-      "afternoon": "Về TP.HCM"
-    }
-  },
-  "image_url": "https://images.example.com/dalat.jpg",
+  "image_urls": "https://images.example.com/dalat1.jpg|https://images.example.com/dalat2.jpg|https://images.example.com/dalat3.jpg",
+  "cuisine": "Ẩm thực miền Trung, Lẩu gà lá é",
+  "suitable_for": "Gia đình, Cặp đôi, Honeymoon",
   "is_active": true
 }
 ```
@@ -379,13 +340,11 @@ Content-Type: application/json
 - `duration_days` (integer > 0): Số ngày tour
 - `price` (float > 0): Giá tour (VNĐ)
 - `available_slots` (integer ≥ 0): Số chỗ còn trống
-- `departure_location` (string, 1-255 chars): Điểm khởi hành
 - `start_date` (date, format: YYYY-MM-DD): Ngày bắt đầu
 - `end_date` (date, format: YYYY-MM-DD): Ngày kết thúc
-- `includes` (array of strings): Các dịch vụ bao gồm
-- `excludes` (array of strings, optional): Các dịch vụ không bao gồm
-- `itinerary` (object, optional): Lịch trình chi tiết theo ngày (JSONB)
-- `image_url` (string, optional, max 500 chars): URL hình ảnh
+- `image_urls` (string, optional): URL hình ảnh phân cách bằng | (ví dụ: "url1|url2|url3")
+- `cuisine` (string, optional, max 500 chars): Ẩm thực đặc trưng
+- `suitable_for` (string, optional, max 500 chars): Phù hợp cho (gia đình, cặp đôi, nhóm bạn...)
 - `is_active` (boolean, default: true): Trạng thái kích hoạt
 
 **Response (201 Created):**
@@ -431,6 +390,7 @@ Content-Type: application/json
 {
   "price": 2800000,
   "available_slots": 15,
+  "cuisine": "Ẩm thực miền Trung, Cao Lầu",
   "is_active": true
 }
 ```
@@ -443,26 +403,10 @@ Content-Type: application/json
   "available_slots": 15,
   "start_date": "2024-12-15",
   "end_date": "2024-12-17",
-  "includes": [
-    "Khách sạn 5 sao",
-    "Ăn 3 bữa/ngày cao cấp",
-    "Hướng dẫn viên tiếng Anh"
-  ],
+  "image_urls": "https://example.com/new1.jpg|https://example.com/new2.jpg",
+  "cuisine": "Ẩm thực cao cấp, Đặc sản Đà Lạt",
+  "suitable_for": "Gia đình VIP, Cặp đôi cao cấp",
   "is_active": true
-}
-```
-
-**Example - Update itinerary:**
-```json
-{
-  "itinerary": {
-    "day1": {
-      "title": "Ngày 1 - UPDATED",
-      "morning": "Nội dung mới...",
-      "afternoon": "Nội dung mới...",
-      "evening": "Nội dung mới..."
-    }
-  }
 }
 ```
 

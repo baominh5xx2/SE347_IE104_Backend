@@ -126,13 +126,11 @@ async def create_tour_package(
             "duration_days": 3,
             "price": 2500000,
             "available_slots": 20,
-            "departure_location": "TP.HCM",
             "start_date": "2024-12-01",
             "end_date": "2024-12-03",
-            "includes": ["Khách sạn 4*", "Ăn 3 bữa", "Hướng dẫn viên"],
-            "excludes": ["Vé máy bay"],
-            "itinerary": {"day1": "Khởi hành", "day2": "Tham quan", "day3": "Về"},
-            "image_url": "https://example.com/image.jpg",
+            "image_urls": "https://example.com/img1.jpg|https://example.com/img2.jpg",
+            "cuisine": "Ẩm thực miền Trung",
+            "suitable_for": "Gia đình, Cặp đôi",
             "is_active": true
         }
     """

@@ -15,13 +15,11 @@ class TourPackageBase(BaseModel):
     duration_days: int = Field(..., gt=0, description="Số ngày tour")
     price: float = Field(..., gt=0, description="Giá tour")
     available_slots: int = Field(..., ge=0, description="Số chỗ còn trống")
-    departure_location: str = Field(..., min_length=1, max_length=255, description="Điểm khởi hành")
     start_date: date = Field(..., description="Ngày bắt đầu")
     end_date: date = Field(..., description="Ngày kết thúc")
-    includes: List[str] = Field(..., description="Các dịch vụ bao gồm")
-    excludes: Optional[List[str]] = Field(default=None, description="Các dịch vụ không bao gồm")
-    itinerary: Optional[dict] = Field(default=None, description="Lịch trình theo ngày (JSONB)")
-    image_url: Optional[str] = Field(default=None, max_length=500, description="URL hình ảnh")
+    image_urls: Optional[str] = Field(default=None, description="URL hình ảnh (phân cách bằng |)")
+    cuisine: Optional[str] = Field(default=None, max_length=500, description="Ẩm thực")
+    suitable_for: Optional[str] = Field(default=None, max_length=500, description="Phù hợp cho")
     is_active: bool = Field(default=True, description="Trạng thái kích hoạt")
 
 
@@ -38,13 +36,11 @@ class TourPackageUpdate(BaseModel):
     duration_days: Optional[int] = Field(None, gt=0)
     price: Optional[float] = Field(None, gt=0)
     available_slots: Optional[int] = Field(None, ge=0)
-    departure_location: Optional[str] = Field(None, min_length=1, max_length=255)
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    includes: Optional[List[str]] = None
-    excludes: Optional[List[str]] = None
-    itinerary: Optional[dict] = None
-    image_url: Optional[str] = Field(None, max_length=500)
+    image_urls: Optional[str] = None
+    cuisine: Optional[str] = Field(None, max_length=500)
+    suitable_for: Optional[str] = Field(None, max_length=500)
     is_active: Optional[bool] = None
 
 
