@@ -44,7 +44,7 @@ class TourEmbeddingGenerator:
             return []
     
     def create_embedding_text(self, package: Dict[str, Any]) -> str:
-        """Create comprehensive text for embedding from tour package"""đ
+        """Create comprehensive text for embedding from tour package"""
         # Combine all relevant information
         text_parts = [
             f"Tour: {package.get('package_name', '')}",
