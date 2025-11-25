@@ -26,17 +26,19 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    """Login request schema"""
+    """Login request schema - can login with either email or phone_number"""
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "email": "a.nguyen@example.com",
+                "phone_number": "0123456789",
                 "password": "password123"
             }
         }
     )
     
-    email: EmailStr = Field(..., description="Email address")
+    email: Optional[EmailStr] = Field(None, description="Email address (required if phone_number not provided)")
+    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number (required if email not provided)")
     password: str = Field(..., description="Password")
 
 

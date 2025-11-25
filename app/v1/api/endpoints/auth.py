@@ -77,9 +77,10 @@ async def login(
 ):
     """
     Authenticate user and return access token
+    Can login with either email or phone_number
     
     Args:
-        request: Login request data
+        request: Login request data (must provide either email or phone_number with password)
         auth_service: Authentication service instance
         
     Returns:
@@ -87,8 +88,9 @@ async def login(
     """
     try:
         result = await auth_service.login_user(
+            password=request.password,
             email=request.email,
-            password=request.password
+            phone_number=request.phone_number
         )
         
         return LoginResponse(**result)
