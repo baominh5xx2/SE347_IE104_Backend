@@ -157,28 +157,46 @@ class AuthService:
                 "EM": f"Registration error: {str(e)}"
             }
     
-    async def login_user(self, email: str, password: str) -> Dict[str, Any]:
+    async def login_user(
+        self, 
+        password: str,
+        email: Optional[str] = None, 
+        phone_number: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Authenticate user and generate access token
+        Can login with either email or phone_number
         
         Args:
-            email: User's email address
             password: User's password
+            email: User's email address (optional)
+            phone_number: User's phone number (optional)
             
         Returns:
             Dict containing login result with access token
         """
         try:
-            # Fetch user by email
-            result = self.supabase.table('users') \
-                .select("*") \
-                .eq('email', email) \
-                .execute()
+            # Validate that at least one identifier is provided
+            if not email and not phone_number:
+                return {
+                    "EC": 1,
+                    "EM": "Either email or phone_number must be provided"
+                }
+            
+            # Fetch user by email or phone_number
+            query = self.supabase.table('users').select("*")
+            
+            if email:
+                query = query.eq('email', email)
+            else:
+                query = query.eq('phone_number', phone_number)
+            
+            result = query.execute()
             
             if not result.data:
                 return {
-                    "EC": 1,
-                    "EM": "Email/Password is incorrect"
+                    "EC": 2,
+                    "EM": "Email/Phone/Password is incorrect"
                 }
             
             user = result.data[0]
@@ -186,15 +204,15 @@ class AuthService:
             # Check if user has password (TRADITIONAL login)
             if not user.get('password_hash'):
                 return {
-                    "EC": 1,
-                    "EM": "Email/Password is incorrect"
+                    "EC": 2,
+                    "EM": "Email/Phone/Password is incorrect"
                 }
             
             # Verify password
             if not self._verify_password(password, user['password_hash']):
                 return {
                     "EC": 2,
-                    "EM": "Email/Password is incorrect"
+                    "EM": "Email/Phone/Password is incorrect"
                 }
             
             # Check if account is activated
