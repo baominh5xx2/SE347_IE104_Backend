@@ -1,7 +1,7 @@
 """
 Authentication Schemas
 """
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, model_validator
 from typing import Optional
 from datetime import datetime
 
@@ -40,6 +40,13 @@ class LoginRequest(BaseModel):
     email: Optional[EmailStr] = Field(None, description="Email address (required if phone_number not provided)")
     phone_number: Optional[str] = Field(None, max_length=20, description="Phone number (required if email not provided)")
     password: str = Field(..., description="Password")
+    
+    @model_validator(mode='after')
+    def check_email_or_phone(self):
+        """Validate that at least one of email or phone_number is provided"""
+        if not self.email and not self.phone_number:
+            raise ValueError('Either email or phone_number must be provided')
+        return self
 
 
 class VerifyTokenRequest(BaseModel):
