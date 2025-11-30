@@ -113,137 +113,212 @@ Truy cập API documentation tại: `http://localhost:8000/docs`
 
 ## 📡 API Endpoints
 
+### Authentication
+- `POST /api/v1/auth/register` - Đăng ký (email, phone, password, full_name)
+- `POST /api/v1/auth/login` - Đăng nhập (email/phone + password)
+- `POST /api/v1/auth/verify-token` - Verify JWT token
+- `GET /api/v1/auth/google` - Google OAuth URL
+- `GET /api/v1/auth/google/callback` - Google OAuth callback
+
+### Tour Packages
+- `GET /api/v1/tour-packages` - Lấy danh sách tour (có pagination)
+- `GET /api/v1/tour-packages/{id}` - Chi tiết tour
+- `POST /api/v1/tour-packages` - Tạo tour mới
+- `PUT /api/v1/tour-packages/{id}` - Cập nhật tour
+- `DELETE /api/v1/tour-packages/{id}` - Xóa tour
+
+### Bookings
+- `GET /api/v1/bookings` - Lấy danh sách bookings (filter by user_id, status)
+- `GET /api/v1/bookings/{id}` - Chi tiết booking
+- `POST /api/v1/bookings` - Tạo booking mới
+- `PUT /api/v1/bookings/{id}` - Cập nhật booking
+- `DELETE /api/v1/bookings/{id}` - Xóa booking (hoàn trả slots)
+
+### AI Chatbot
+- `POST /api/v1/agent/chat` - Chat với AI assistant
+- `GET /api/v1/agent/history/{user_id}` - Lịch sử chat
+
 ### Health Check
 - `GET /health` - Health check
 - `GET /api/v1/health/` - Detailed health status
 - `GET /api/v1/health/ready` - Readiness check
 
-### Chat
-- `POST /api/v1/chat/` - Gửi tin nhắn
-- `GET /api/v1/chat/conversation/{conversation_id}` - Lấy lịch sử hội thoại
-- `DELETE /api/v1/chat/conversation/{conversation_id}` - Xóa hội thoại
-
-### Agent Management
-- `GET /api/v1/agent/status` - Trạng thái agent
-- `GET /api/v1/agent/graph` - Cấu trúc LangGraph
-- `GET /api/v1/agent/info` - Thông tin chi tiết agent
-
 ## 💬 Ví dụ sử dụng
 
-### Gửi tin nhắn chat
+### Đăng ký tài khoản
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/chat/" \
+curl -X POST "http://localhost:8000/api/v1/auth/register" \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "What is LangGraph?",
-    "conversation_id": null,
-    "user_id": "user_123"
+    "full_name": "Nguyen Van A",
+    "email": "a.nguyen@example.com",
+    "phone_number": "0123456789",
+    "password": "password123"
   }'
 ```
 
-Response:
-
-```json
-{
-  "conversation_id": "conv_abc123",
-  "message": "LangGraph is a library for building stateful, multi-actor applications...",
-  "metadata": {
-    "iterations": 1,
-    "final_step": "validating_response",
-    "validated": true
-  },
-  "timestamp": "2025-10-10T10:30:00.000Z"
-}
-```
-
-### Lấy lịch sử hội thoại
+### Đăng nhập bằng email
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/chat/conversation/conv_abc123"
+curl -X POST "http://localhost:8000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "a.nguyen@example.com",
+    "password": "password123"
+  }'
 ```
 
-## 🔄 LangGraph Workflow
+### Đăng nhập bằng phone
 
-Agent sử dụng workflow sau:
-
-```
-[Start] 
-   ↓
-[Process Input] - Xử lý input và chuẩn bị context
-   ↓
-[Generate Response] - Tạo response bằng LLM
-   ↓
-[Validate Response] - Kiểm tra chất lượng response
-   ↓
-Decision:
-  - Valid → [End]
-  - Invalid & iterations < max → [Generate Response]
-  - Max iterations → [End]
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone_number": "0123456789",
+    "password": "password123"
+  }'
 ```
 
-## 🧩 Các component chính
+### Tạo tour mới
 
-### 1. LangGraphAgent
-- Orchestrate workflow của AI agent
-- Multi-step reasoning với validation
-- State management qua các bước
-
-### 2. ConversationManager
-- Quản lý lịch sử hội thoại
-- In-memory storage (có thể mở rộng với Redis/Database)
-- Context tracking
-
-### 3. Schemas
-- Type-safe models với Pydantic
-- Request/Response validation
-- State definitions
-
-## 🔧 Mở rộng
-
-### Thêm node mới vào workflow
-
-Trong `langgraph_agent.py`:
-
-```python
-def _build_graph(self):
-    workflow = StateGraph(AgentState)
-    
-    # Thêm node mới
-    workflow.add_node("your_new_node", self._your_new_function)
-    
-    # Thêm edge
-    workflow.add_edge("previous_node", "your_new_node")
-    
-    return workflow.compile()
+```bash
+curl -X POST "http://localhost:8000/api/v1/tour-packages" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "package_name": "Ha Long Bay 3N2D",
+    "destination": "Ha Long",
+    "description": "Explore the beautiful Ha Long Bay",
+    "duration_days": 3,
+    "price": 5000000,
+    "available_slots": 20,
+    "start_date": "2025-12-01",
+    "end_date": "2025-12-03",
+    "image_urls": "https://example.com/img1.jpg|https://example.com/img2.jpg",
+    "cuisine": "Vietnamese seafood",
+    "suitable_for": "Family, Couples"
+  }'
 ```
 
-### Thêm tools cho agent
+### Tạo booking
 
-1. Tạo tool function trong `langgraph_agent.py`
-2. Register tool với agent
-3. Update workflow để sử dụng tool
+```bash
+# total_amount sẽ tự động tính = price * number_of_people
+curl -X POST "http://localhost:8000/api/v1/bookings" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "package_id": "123e4567-e89b-12d3-a456-426614174000",
+    "number_of_people": 2,
+    "contact_name": "Nguyen Van A",
+    "contact_phone": "0123456789",
+    "special_requests": "Phòng view đẹp",
+    "user_id": "bcde5ff1-5fd7-49e0-8790-05463092d54e"
+  }'
+```
 
-## 📚 Tài liệu tham khảo
+## 🧪 Testing
 
-- [LangGraph Documentation](https://python.langchain.com/docs/langgraph)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [LangChain Documentation](https://python.langchain.com/)
+```bash
+# Chạy tất cả tests
+pytest tests/ -v
+
+# Test tour package service
+pytest tests/test_tour_package.py -v
+
+# Test booking service
+pytest tests/test_booking.py -v
+
+# Test authentication
+pytest tests/test_auth/ -v
+```
+
+## 🔑 Database Schema
+
+### users
+- `user_id` (UUID, PK)
+- `email` (unique)
+- `phone_number` (unique, nullable)
+- `full_name`
+- `password_hash` (nullable, cho Google OAuth)
+- `login_type` (TRADITIONAL/GOOGLE)
+- `is_activate` (boolean)
+
+### tour_packages
+- `package_id` (UUID, PK)
+- `package_name`, `destination`, `description`
+- `duration_days`, `price`, `available_slots`
+- `start_date`, `end_date`
+- `image_urls` (pipe-separated URLs)
+- `cuisine`, `suitable_for`
+- `is_active` (boolean)
+
+### bookings
+- `booking_id` (UUID, PK)
+- `package_id` (UUID, FK → tour_packages)
+- `user_id` (UUID, FK → users)
+- `number_of_people`, `total_amount`
+- `contact_name`, `contact_phone`
+- `special_requests` (optional)
+- `status` (pending/confirmed/cancelled/completed)
+- `created_at`, `updated_at`
+
+### package_embeddings
+- `package_id` (UUID, FK → tour_packages)
+- `embedding` (vector[1536])
+- Auto-generated bằng OpenAI text-embedding-3-small
+
+## 🔄 Business Logic
+
+### Booking Flow
+1. **Create Booking**: 
+   - Kiểm tra tour package tồn tại và active
+   - Kiểm tra available_slots đủ
+   - **Tự động tính total_amount** = package.price × number_of_people
+   - Tạo booking với status="pending"
+   - Trừ slots khỏi tour package
+
+2. **Update Booking**:
+   - Cho phép thay đổi number_of_people (cập nhật slots tương ứng)
+   - **Tự động tính lại total_amount** khi thay đổi number_of_people
+   - Cho phép thay đổi status (pending → confirmed → completed)
+   - Không cho phép thay đổi package_id
+
+3. **Delete Booking**:
+   - Xóa booking khỏi database
+   - Hoàn trả slots về tour package (nếu status là pending/confirmed)
+
+## 📚 Tech Stack
+
+- **Framework**: FastAPI 0.115+
+- **Database**: Supabase (PostgreSQL + pgvector)
+- **Authentication**: JWT, bcrypt, Google OAuth
+- **AI**: OpenAI GPT-4, LangGraph, MCP
+- **Embeddings**: OpenAI text-embedding-3-small (1536 dims)
+- **Testing**: pytest, pytest-asyncio
+- **Package Manager**: uv
 
 ## 🐛 Troubleshooting
 
-### Lỗi OpenAI API Key
-Đảm bảo đã set `OPENAI_API_KEY` trong file `.env`
+**Lỗi Supabase connection:**  
+Kiểm tra `SUPABASE_URL` và `SUPABASE_KEY` trong `.env`
 
-### Lỗi import modules
-Chạy `pip install -r requirements.txt` để cài đặt đầy đủ dependencies
+**Lỗi embedding dimension:**  
+Đảm bảo sử dụng model `text-embedding-3-small` (1536 dims), không phải `text-embedding-3-large` (3072 dims)
 
-### Port đã được sử dụng
-Thay đổi port trong `.env` hoặc khi chạy uvicorn:
+**Port 8000 đã sử dụng:**  
 ```bash
-uvicorn main:app --port 8001
+uv run uvicorn main:app --port 8001
 ```
+
+**Test failures:**  
+Đảm bảo đã mock các OpenAI API calls trong tests
+
+**Booking không trừ slots:**  
+Kiểm tra foreign key constraints giữa bookings và tour_packages
 
 ## 📝 License
 
 MIT License
+
