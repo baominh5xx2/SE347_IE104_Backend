@@ -4,14 +4,13 @@ Node functions for Chat Agent graph
 """
 from typing import Literal
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langgraph.graph import END
 import logging
 import json
 from app.v1.core.prompts import prompt_manager
 from app.v1.services.agent_services.state import AgentState
-from app.v1.services.agent_services.memory import conversation_memory
 from app.v1.services.agent_services.tools import get_chat_tools
 from app.v1.core.logging_config import get_current_agent_callback
-from langgraph.graph import END
 
 logger = logging.getLogger(__name__)
 
@@ -38,38 +37,27 @@ class ChatAgentNodes:
         """
         LLM node: LLM decides whether to call a tool or respond
         
-        Following LangGraph agent pattern:
-        https://docs.langchain.com/oss/python/langgraph/workflows-agents
+        Follows standard LangGraph agent pattern - uses state messages only.
+        No external context injection - LLM works with conversation history from state.
         """
+        logger.info("🤖 [Chat LLM] Processing...")
         try:
-            conversation_id = state.get("conversation_id", "default_conv")
-            
-            # Get conversation-specific memory
-            memory = conversation_memory.get_memory(conversation_id)
-            
-            # Prepare messages with system prompt from agent.yaml
-            # Reads from: agents[name='chat_agent'].config.prompts.system
+            # Get system prompt
             system_prompt = prompt_manager.get_system_prompt('chat_agent')
             
-            # Add context about recommended package_ids if available
-            recommended_package_ids = state.get("recommended_package_ids", [])
-            if recommended_package_ids:
-                package_ids_context = f"\n\nIMPORTANT CONTEXT: Available package IDs from recent recommendations: {', '.join(recommended_package_ids)}. When creating booking, use one of these exact package IDs."
-                system_prompt += package_ids_context
-            
-            # Combine memory messages with current state messages
-            messages = [SystemMessage(content=system_prompt)]
-            messages.extend(list(memory.messages))
-            
-            # Add current state messages
+            # Get current messages from state (LangGraph checkpointer handles persistence)
             current_messages = state.get("messages", [])
+            
+            # Build messages for LLM - standard LangGraph pattern
+            messages = [SystemMessage(content=system_prompt)]
+            
+            # Add all state messages (conversation history)
             if current_messages:
                 for msg in current_messages:
                     if not isinstance(msg, SystemMessage):
                         messages.append(msg)
             
-            # Get LLM response with tools bound (with callback handler for logging)
-            # Chat Agent will process the recommendation message and create a natural response
+            # Get LLM response with tools bound
             llm_with_tools = self.llm.bind_tools(self.tools)
             agent_callback = get_current_agent_callback()
             response = await llm_with_tools.ainvoke(
@@ -77,14 +65,19 @@ class ChatAgentNodes:
                 config={"callbacks": [agent_callback]}
             )
             
-            # Store response in state messages
-            state["messages"] = [response]
+            # Log tool calls if any
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                for tool_call in response.tool_calls:
+                    logger.info(f"🔧 [Chat LLM] Calling tool: {tool_call.get('name')}")
             
-            # Extract response content
-            if hasattr(response, 'content'):
+            # Append response to messages (don't replace!)
+            state["messages"].append(response)
+            
+            # Extract response content (only if no tool calls)
+            if hasattr(response, 'content') and response.content:
                 state["chat_response"] = response.content
-                # Update final_response - Chat Agent's response is the final one
                 state["final_response"] = response.content
+            
             return state
             
         except Exception as e:
@@ -117,11 +110,17 @@ class ChatAgentNodes:
                     recommendation_params = tool_call.get("args", {})
                     break
             
-            # Execute all tool calls (tool calls will be logged by callback handler)
+            # Extract user_id and user_phone from state (will be used for auto-injection)
+            user_id = state.get("user_id", "")
+            user_phone = state.get("user_phone", "")
+            
+            # Execute all tool calls
+            logger.info(f"⚙️ [Chat Tools] Executing {len(last_message.tool_calls)} tool(s)...")
             tool_results = []
             for tool_call in last_message.tool_calls:
                 tool_name = tool_call["name"]
                 tool_args = tool_call.get("args", {})
+                logger.info(f"  → {tool_name}")
                 
                 # Get tool by name
                 tool = self.tools_by_name.get(tool_name)
@@ -141,11 +140,88 @@ class ChatAgentNodes:
                             except (json.JSONDecodeError, Exception):
                                 pass
                         
+                        # Auto-inject user_id for get_user_bookings tool
+                        if tool_name == "get_user_bookings" and user_id:
+                            tool_args["user_id"] = user_id
+                            logger.info(f"✅ Auto-injected user_id '{user_id}' into get_user_bookings")
+                        
+                        # Auto-inject user_phone and user_id for create_booking tool
+                        if tool_name == "create_booking":
+                            # Inject user_phone if available and not provided
+                            if user_phone and not tool_args.get("user_phone"):
+                                tool_args["user_phone"] = user_phone
+                                logger.info(f"✅ Auto-injected user_phone '{user_phone}' into create_booking")
+                            
+                            # Inject user_id if available and not provided
+                            if user_id and not tool_args.get("user_id"):
+                                tool_args["user_id"] = user_id
+                                logger.info(f"✅ Auto-injected user_id '{user_id}' into create_booking")
+                        
                         # Optional validation for create_booking tool (only warn, don't block)
                         if tool_name == "create_booking" and isinstance(tool_args, dict):
                             package_id = tool_args.get("package_id")
-                            recommended_package_ids = state.get("recommended_package_ids", [])
                             
+                            # Get packages from state (persisted from recommendation)
+                            tour_packages = state.get("tour_packages", [])
+                            recommended_package_ids = [pkg.get("package_id") for pkg in tour_packages if pkg.get("package_id")]
+                            
+                            # === CRITICAL FIX: Auto-inject tour data from state ===
+                            # LLM cannot remember full JSON objects. We MUST inject the data from state.
+                            if tool_name == "generate_tour_ui":
+                                if tour_packages:
+                                    tool_args["packages"] = tour_packages
+                                    logger.info(f"✅ Auto-injected {len(tour_packages)} packages from state into generate_tour_ui tool")
+                                    # Log first package for verification
+                                    if len(tour_packages) > 0:
+                                        pkg = tour_packages[0]
+                                        logger.info(f"   Sample data: {pkg.get('package_name')} | Img: {str(pkg.get('image_urls') or pkg.get('image_url'))[:30]}...")
+                                else:
+                                    logger.warning("⚠️ generate_tour_ui called but NO packages found in state!")
+
+                            # SMART ID RESOLUTION: Map index/number/hallucinated_id to real package_id
+                            # If package_id is a small number (e.g. "1", "2") or "tour 1", map it to real ID
+                            if package_id and tour_packages:
+                                try:
+                                    # 1. Try index-based mapping (e.g. "1", "tour 1")
+                                    clean_id = str(package_id).lower().replace("tour", "").replace("số", "").strip()
+                                    if clean_id.isdigit():
+                                        idx = int(clean_id) - 1 # 1-based index to 0-based
+                                        if 0 <= idx < len(tour_packages):
+                                            real_package_id = tour_packages[idx].get("package_id")
+                                            if real_package_id:
+                                                logger.info(f"🔄 Smart Resolution: Mapped index '{package_id}' -> '{real_package_id}'")
+                                                tool_args["package_id"] = real_package_id
+                                                package_id = real_package_id # Update local var
+                                    
+                                    # 2. Try fallback for hallucinated IDs (e.g. "pkg_tour_1", "package_1")
+                                    # If it's NOT a valid UUID and we have packages, default to the first package or try to match
+                                    elif len(str(package_id)) < 30: # UUIDs are 36 chars
+                                        logger.warning(f"⚠️ Detect potential hallucinated ID: '{package_id}'")
+                                        
+                                        # Simple heuristic: if user says "tour 1" or similar, we handled it above.
+                                        # If LLM hallucinated "pkg_tour_1" likely it means the first tour presented.
+                                        if "1" in str(package_id) and len(tour_packages) >= 1:
+                                            real_package_id = tour_packages[0].get("package_id")
+                                            logger.info(f"🔄 Smart Resolution: Mapped hallucinated '{package_id}' -> '{real_package_id}' (First package)")
+                                            tool_args["package_id"] = real_package_id
+                                            package_id = real_package_id
+                                        elif "2" in str(package_id) and len(tour_packages) >= 2:
+                                            real_package_id = tour_packages[1].get("package_id")
+                                            logger.info(f"🔄 Smart Resolution: Mapped hallucinated '{package_id}' -> '{real_package_id}' (Second package)")
+                                            tool_args["package_id"] = real_package_id
+                                            package_id = real_package_id
+                                        else:
+                                            # Ultimate fallback: Use the first package if available
+                                            # This is better than crashing with invalid UUID
+                                            if tour_packages:
+                                                real_package_id = tour_packages[0].get("package_id")
+                                                logger.info(f"🔄 Smart Resolution: Fallback mapped '{package_id}' -> '{real_package_id}' (First available)")
+                                                tool_args["package_id"] = real_package_id
+                                                package_id = real_package_id
+                                                
+                                except Exception as map_err:
+                                    logger.warning(f"⚠️ Failed to map package_id '{package_id}': {map_err}")
+
                             # Just log warning if no recommendations, but allow booking to proceed
                             # MCP server will validate the package_id anyway
                             if not recommended_package_ids:
@@ -163,6 +239,27 @@ class ChatAgentNodes:
                                 tool_args,
                                 config={"callbacks": [agent_callback]}
                             )
+                            
+                            # === MCP-UI INTEGRATION ===
+                            # Capture the UI Resource from the tool result
+                            if tool_name == "generate_tour_ui" and isinstance(result, dict):
+                                # Support both legacy HTML and new UI Resource format
+                                html_content = result.get("html")
+                                ui_resource = result.get("ui_resource")
+                                
+                                if ui_resource:
+                                    state["mcp_ui_resource"] = ui_resource
+                                    logger.info(f"✅ Saved MCP UI Resource to state (URI: {ui_resource.get('uri', 'unknown')})")
+                                
+                                if html_content:
+                                    state["mcp_ui_html"] = html_content
+                                    
+                                if ui_resource or html_content:
+                                    result_str = "MCP UI generated successfully. UI Resource ready for client rendering."
+                                else:
+                                    result_str = str(result)
+                            else:
+                                result_str = str(result)
                         except Exception as invoke_error:
                             logger.error(f"CHAT TOOLS: Tool '{tool_name}' failed: {str(invoke_error)}")
                             raise
@@ -192,7 +289,7 @@ class ChatAgentNodes:
             logger.error(f"CHAT TOOLS: Error: {str(e)}")
             return state
     
-    def should_continue_tool_loop(self, state: AgentState) -> Literal["chat_tools", END]:
+    def should_continue_tool_loop(self, state: AgentState) -> str:
         """
         Decide if we should continue the tool loop or end
         
@@ -209,7 +306,7 @@ class ChatAgentNodes:
         # Otherwise, end (Chat Agent decided no tools needed)
         return END
     
-    def should_recommend(self, state: AgentState) -> Literal["recommendation_agent", "chat_llm"]:
+    def should_recommend(self, state: AgentState) -> str:
         """
         Decide routing after tool execution
         
@@ -218,6 +315,8 @@ class ChatAgentNodes:
         """
         needs_recommendation = state.get("needs_recommendation", False)
         if needs_recommendation:
+            logger.info("🔀 [Supervisor] Routing to Recommendation Agent")
             return "recommendation_agent"
+        logger.info("✅ [Supervisor] Conversation complete")
         return "chat_llm"
 

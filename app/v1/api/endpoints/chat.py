@@ -3,7 +3,9 @@ Chat API Endpoints
 """
 import logging
 import uuid
+import json
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from typing import Optional
 from ...schema.agent_schema import ChatRequest, ChatResponse, ConversationHistory
 from ...services.agent_services import supervisor_graph
@@ -13,6 +15,202 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post("/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Send a chat message and get AI response via streaming
+    """
+    try:
+        # Generate conversation_id if not provided
+        conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
+        user_id = request.user_id or "df40e279-3389-4d4b-8d94-6ef74d9545b4"
+        
+        async def event_generator():
+            try:
+                # Send start event
+                start_event = {
+                    "type": "start",
+                    "conversation_id": conversation_id,
+                    "user_id": user_id
+                }
+                yield f"data: {json.dumps(start_event, ensure_ascii=False)}\n\n"
+                
+                # Track response for storage
+                full_response = ""
+                recommendations = []
+                tour_packages = []
+                metadata = {}
+                
+                # Track MCP UI data and whether tokens have been streamed
+                pending_mcp_ui_resource = None
+                pending_mcp_ui_html = None
+                pending_tour_packages = None
+                has_streamed_tokens = False
+                
+                # Stream from LangGraph
+                async for event in supervisor_graph.process_message_stream(
+                    user_message=request.message,
+                    conversation_id=conversation_id,
+                    user_id=user_id
+                ):
+                    event_type = event.get("event", "")
+                    
+                    # Stream LLM tokens
+                    if event_type == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk", {})
+                        if hasattr(chunk, "content") and chunk.content:
+                            token_event = {
+                                "type": "token",
+                                "content": chunk.content
+                            }
+                            yield f"data: {json.dumps(token_event, ensure_ascii=False)}\n\n"
+                            full_response += chunk.content
+                            has_streamed_tokens = True
+                            
+                            # If we have pending MCP UI and now have tokens, send it
+                            if pending_mcp_ui_resource or pending_mcp_ui_html or pending_tour_packages:
+                                if pending_mcp_ui_resource and isinstance(pending_mcp_ui_resource, dict):
+                                    if 'uri' in pending_mcp_ui_resource:
+                                        pending_mcp_ui_resource['uri'] = str(pending_mcp_ui_resource['uri'])
+                                
+                                ui_event = {
+                                    "type": "mcp_ui",
+                                    "ui_resource": pending_mcp_ui_resource,
+                                    "html": pending_mcp_ui_html,  # Keep for backward compatibility
+                                    "tourPackages": pending_tour_packages  # New: Send tour packages data
+                                }
+                                logger.info(f"📤 Streaming MCP UI event (after tokens): {len(pending_tour_packages) if pending_tour_packages else 0} tour packages")
+                                yield f"data: {json.dumps(ui_event, ensure_ascii=False)}\n\n"
+                                
+                                # Clear pending
+                                pending_mcp_ui_resource = None
+                                pending_mcp_ui_html = None
+                                pending_tour_packages = None
+                    
+                    # Track final state
+                    elif event_type == "on_chain_end":
+                        chain_output = event.get("data", {}).get("output", {})
+                        if isinstance(chain_output, dict):
+                            if "final_response" in chain_output:
+                                full_response = chain_output.get("final_response", full_response)
+                            if "recommended_package_ids" in chain_output:
+                                recommendations = chain_output.get("recommended_package_ids", [])
+                            if "tour_packages" in chain_output:
+                                tour_packages = chain_output.get("tour_packages", [])
+                            if "metadata" in chain_output:
+                                metadata = chain_output.get("metadata", {})
+                            
+                            # Check for MCP UI Resource updates
+                            mcp_ui_resource = chain_output.get("mcp_ui_resource")
+                            mcp_ui_html = chain_output.get("mcp_ui_html")
+                            tour_packages_for_ui = chain_output.get("tour_packages", [])
+                            
+                            # Only send tour packages if this is a recommendation response (check URI)
+                            is_recommendation_response = False
+                            if mcp_ui_resource and isinstance(mcp_ui_resource, dict):
+                                uri = str(mcp_ui_resource.get('uri', ''))
+                                if 'tour-recommendations' in uri:
+                                    is_recommendation_response = True
+                            
+                            # Only include tour packages if this is a recommendation response
+                            if mcp_ui_resource or mcp_ui_html or (tour_packages_for_ui and is_recommendation_response):
+                                # Convert AnyUrl objects to strings if present in mcp_ui_resource
+                                if mcp_ui_resource and isinstance(mcp_ui_resource, dict):
+                                    if 'uri' in mcp_ui_resource:
+                                        mcp_ui_resource['uri'] = str(mcp_ui_resource['uri'])
+                                
+                                # If tokens have already been streamed, send UI immediately
+                                if has_streamed_tokens:
+                                    ui_event = {
+                                        "type": "mcp_ui",
+                                        "ui_resource": mcp_ui_resource,
+                                        "html": mcp_ui_html,  # Keep for backward compatibility
+                                        "tourPackages": tour_packages_for_ui[:5] if (tour_packages_for_ui and is_recommendation_response) else None  # Only send if recommendation
+                                    }
+                                    logger.info(f"📤 Streaming MCP UI event (tokens already streamed): {len(tour_packages_for_ui) if (tour_packages_for_ui and is_recommendation_response) else 0} tour packages")
+                                    yield f"data: {json.dumps(ui_event, ensure_ascii=False)}\n\n"
+                                else:
+                                    # Store for later (will be sent when first token arrives)
+                                    pending_mcp_ui_resource = mcp_ui_resource
+                                    pending_mcp_ui_html = mcp_ui_html
+                                    pending_tour_packages = tour_packages_for_ui[:5] if (tour_packages_for_ui and is_recommendation_response) else None
+                                    logger.info(f"⏳ MCP UI pending (waiting for tokens): {len(tour_packages_for_ui) if (tour_packages_for_ui and is_recommendation_response) else 0} tour packages")
+                
+                # If we still have pending MCP UI but no tokens were streamed (edge case), send it at the end
+                if (pending_mcp_ui_resource or pending_mcp_ui_html or pending_tour_packages) and not has_streamed_tokens:
+                    if pending_mcp_ui_resource and isinstance(pending_mcp_ui_resource, dict):
+                        if 'uri' in pending_mcp_ui_resource:
+                            pending_mcp_ui_resource['uri'] = str(pending_mcp_ui_resource['uri'])
+                    
+                    ui_event = {
+                        "type": "mcp_ui",
+                        "ui_resource": pending_mcp_ui_resource,
+                        "html": pending_mcp_ui_html,  # Keep for backward compatibility
+                        "tourPackages": pending_tour_packages  # Only set if recommendation response
+                    }
+                    logger.info(f"📤 Streaming MCP UI event (no tokens, sending at end): {len(pending_tour_packages) if pending_tour_packages else 0} tour packages")
+                    yield f"data: {json.dumps(ui_event, ensure_ascii=False)}\n\n"
+                
+                # Send recommendations (full tour packages) if available
+                if recommendations or tour_packages:
+                    # Use tour_packages if available (has full details), otherwise use IDs
+                    rec_data = tour_packages if tour_packages else recommendations
+                    rec_event = {
+                        "type": "recommendations",
+                        "data": rec_data
+                    }
+                    yield f"data: {json.dumps(rec_event, ensure_ascii=False)}\n\n"
+                
+                # Send metadata
+                metadata_event = {
+                    "type": "metadata",
+                    "conversation_id": conversation_id,
+                    "metadata": metadata
+                }
+                yield f"data: {json.dumps(metadata_event, ensure_ascii=False)}\n\n"
+                
+                # Send done
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                
+                # Store episode in memory (without large tour_packages data to avoid metadata limit)
+                try:
+                    # Only store lightweight metadata to avoid Mem0 2000 char limit
+                    storage_metadata = metadata.copy() if metadata else {}
+                    
+                    # Remove large data that would exceed Mem0 limit
+                    storage_metadata.pop('tour_packages', None)
+                    storage_metadata.pop('recommended_package_ids', None)
+                    
+                    await conversation_memory.store_episode(
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        user_message=request.message,
+                        assistant_response=full_response,
+                        metadata=storage_metadata
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to store episode: {str(e)}")
+                    
+            except Exception as e:
+                logger.error(f"Error in stream generator: {str(e)}")
+                error_event = {"type": "error", "error": str(e)}
+                yield f"data: {json.dumps(error_event)}\n\n"
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in chat_stream endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/", response_model=ChatResponse)
@@ -29,7 +227,7 @@ async def chat(request: ChatRequest):
     try:
         # Generate conversation_id if not provided
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
-        user_id = request.user_id or "anonymous_user"
+        user_id = request.user_id or "df40e279-3389-4d4b-8d94-6ef74d9545b4"
         
         # Process message through supervisor graph
         result = await supervisor_graph.process_message(

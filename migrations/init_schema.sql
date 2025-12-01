@@ -34,6 +34,35 @@ CREATE INDEX IF NOT EXISTS idx_packages_destination ON tour_packages(destination
 CREATE INDEX IF NOT EXISTS idx_packages_dates ON tour_packages(start_date, end_date);
 CREATE INDEX IF NOT EXISTS idx_packages_active ON tour_packages(is_active);
 
+-- Full-text search index for hybrid search optimization
+ALTER TABLE tour_packages ADD COLUMN IF NOT EXISTS search_vector tsvector;
+CREATE INDEX IF NOT EXISTS idx_packages_search_vector ON tour_packages USING GIN(search_vector);
+
+-- Function to update search_vector automatically
+CREATE OR REPLACE FUNCTION update_tour_packages_search_vector() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.search_vector := 
+        setweight(to_tsvector('simple', COALESCE(NEW.package_name, '')), 'A') ||
+        setweight(to_tsvector('simple', COALESCE(NEW.destination, '')), 'B') ||
+        setweight(to_tsvector('simple', COALESCE(NEW.description, '')), 'C');
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to auto-update search_vector on insert/update
+DROP TRIGGER IF EXISTS trigger_update_tour_packages_search_vector ON tour_packages;
+CREATE TRIGGER trigger_update_tour_packages_search_vector
+    BEFORE INSERT OR UPDATE ON tour_packages
+    FOR EACH ROW
+    EXECUTE FUNCTION update_tour_packages_search_vector();
+
+-- Update existing rows
+UPDATE tour_packages SET search_vector = 
+    setweight(to_tsvector('simple', COALESCE(package_name, '')), 'A') ||
+    setweight(to_tsvector('simple', COALESCE(destination, '')), 'B') ||
+    setweight(to_tsvector('simple', COALESCE(description, '')), 'C')
+WHERE search_vector IS NULL;
+
 -- ============================================
 -- BOOKINGS TABLE
 -- ============================================

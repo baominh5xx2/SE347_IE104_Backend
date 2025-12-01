@@ -17,23 +17,27 @@ class RecommendationAgentNodes:
     
     async def recommendation_node(self, state: AgentState) -> AgentState:
         """
-        Recommendation Agent: Provide tour recommendations
+        Recommendation node: Searches and ranks tour packages
         
-        This is called when Chat Agent requests recommendations via request_recommendation tool.
-        Recommendation Agent communicates results back to Chat Agent.
+        Args:
+            state: Current agent state
+            
+        Returns:
+            Updated state with tour recommendations
         """
-        # Get recommendation params from Chat Agent's tool call
-        recommendation_params = state.get("recommendation_params", {})
-        user_query = recommendation_params.get("user_query", "")
-        
-        # Extract user message from state messages as fallback
-        if not user_query:
-            for msg in state.get("messages", []):
-                if isinstance(msg, HumanMessage):
-                    user_query = msg.content
-                    break
-        
+        logger.info("🎯 [Recommendation] Processing...")
         try:
+            # Get recommendation params from Chat Agent's tool call
+            recommendation_params = state.get("recommendation_params", {})
+            user_query = recommendation_params.get("user_query", "")
+            
+            # Extract user message from state messages as fallback
+            if not user_query:
+                for msg in state.get("messages", []):
+                    if isinstance(msg, HumanMessage):
+                        user_query = msg.content
+                        break
+            
             # Build user requirements from Chat Agent's params
             user_requirements = {}
             if recommendation_params.get("destination"):
@@ -63,17 +67,32 @@ class RecommendationAgentNodes:
                 if package_ids:
                     state["recommended_package_ids"] = package_ids
                 
+                # Store full tour packages in state for API response
+                state["tour_packages"] = packages[:5]
+                
                 # Build detailed message with tour info (show top 5 tours)
                 tour_details = []
                 for i, pkg in enumerate(packages[:5], 1):
                     # Get full description or truncate if too long
-                    description = pkg.get('description', 'N/A')        
+                    description = pkg.get('description', 'N/A')
+                    # Get start_date and end_date from package (these are FIXED dates, not user choice)
+                    start_date = pkg.get('start_date', 'N/A')
+                    end_date = pkg.get('end_date', 'N/A')
+                    
+                    # Format dates if available
+                    date_info = ""
+                    if start_date != 'N/A' and end_date != 'N/A':
+                        date_info = f"\n   - Ngày bắt đầu: {start_date}\n   - Ngày kết thúc: {end_date}"
+                    elif start_date != 'N/A':
+                        date_info = f"\n   - Ngày bắt đầu: {start_date}"
+                    
+                    # NOTE: Package ID is stored internally in state["tour_packages"] for backend use
+                    # Do NOT include Package ID in user-facing message
                     tour_info = f"""
 {i}. {pkg.get('package_name', 'N/A')}
    - Địa điểm: {pkg.get('destination', 'N/A')}
-   - Thời gian: {pkg.get('duration_days', 'N/A')} ngày
+   - Thời gian: {pkg.get('duration_days', 'N/A')} ngày{date_info}
    - Giá: {pkg.get('price', 0):,.0f} VND
-   - Package ID: {pkg.get('package_id', 'N/A')}
    - Mô tả: {description}
 """
                     tour_details.append(tour_info)
@@ -90,11 +109,19 @@ Lý do đề xuất: {reasoning}
 
 QUAN TRỌNG: Vui lòng hiển thị TẤT CẢ {num_shown} tour ở trên cho user, đừng tóm tắt hay bỏ qua tour nào.
 
+CRITICAL - VỀ NGÀY KHỞI HÀNH:
+- Mỗi tour package đã có NGÀY BẮT ĐẦU và NGÀY KẾT THÚC CỐ ĐỊNH (đã hiển thị ở trên)
+- KHÔNG hỏi user về "ngày dự kiến khởi hành" - ngày đã được quy định sẵn trong package
+- Ngày bắt đầu và ngày kết thúc lấy từ thông tin package (start_date, end_date), KHÔNG phải user chọn
+
 Sau khi hiển thị đầy đủ, hỏi user:
-- Bạn có muốn đặt tour nào không?
+- Bạn thích tour nào trong số những tour trên? (chỉ cần nói số hoặc tên tour, ví dụ: "tour 1" hoặc "Đà Lạt")
 - Số người đi
-- Ngày khởi hành dự kiến
-- Package ID bạn muốn đặt (từ danh sách trên)"""
+- Số điện thoại liên hệ
+- Yeu cầu khác (nếu có)
+- KHÔNG hỏi Package ID - đó là chi tiết kỹ thuật nội bộ
+
+KHÔNG hỏi về ngày khởi hành - ngày đã được quy định trong package."""
             else:
                 recommendation_message = reasoning if reasoning else "Không tìm thấy tour phù hợp với yêu cầu của bạn."
             
@@ -105,6 +132,35 @@ Sau khi hiển thị đầy đủ, hỏi user:
             
             # Debug: Log recommendation message length
             logger.info(f"🎯 RECOMMENDATION NODE: Created recommendation message ({len(recommendation_message)} chars)")
+            
+            # === SET TOUR PACKAGES DATA FOR FRONTEND ===
+            # Frontend will render using TourCardComponent - no HTML generation needed
+            # ONLY set mcp_ui_resource when we have packages (recommendation response)
+            if packages:
+                # Prepare tour packages data for frontend (limit to 5)
+                tour_packages_for_ui = packages[:5]
+                
+                # Create UIResource object (MCP-UI standard) - but with data instead of HTML
+                # URI must contain "tour-recommendations" to identify as recommendation response
+                ui_resource = {
+                    "uri": f"ui://tour-recommendations/{state.get('conversation_id', 'default')}",
+                    "mimeType": "application/json",
+                    "text": ""  # No HTML, data is in tour_packages
+                }
+                
+                # Save tour packages data to state (frontend will use this to render)
+                # Only set when we have actual recommendations
+                state["mcp_ui_resource"] = ui_resource
+                state["tour_packages"] = tour_packages_for_ui  # Keep for API response
+                
+                logger.info(f"✅ Tour packages data prepared for frontend ({len(tour_packages_for_ui)} tours)")
+            else:
+                # Clear any existing tour packages if no recommendations found
+                state.pop("mcp_ui_resource", None)
+                state.pop("tour_packages", None)
+            
+            # Clear the recommendation flag so we don't loop back
+            state["needs_recommendation"] = False
             
             # Don't set final_response here - let Chat Agent create it
             

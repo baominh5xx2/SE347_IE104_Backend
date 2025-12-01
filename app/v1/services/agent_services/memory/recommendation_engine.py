@@ -1,27 +1,25 @@
 """
 Recommendation Engine
-Uses MCP tools for tour recommendations
+Uses MCP tools for tour recommendations with Mem0 personalization
 """
 from typing import Dict, List, Optional
 import logging
-from .falkor_personalization import falkor_personalization_service
-from app.v1.services.agent_services.mcp_intergation import mcp_client
 
 logger = logging.getLogger(__name__)
 
 
 class RecommendationEngine:
     """
-    Recommendation engine sử dụng MCP tools
+    Recommendation engine sử dụng MCP tools với Mem0 personalization
     
     Current strategy:
     - Semantic vector search via MCP search_tour_packages tool
-    - FalkorDB personalization context (optional)
+    - Mem0 personalization context (user history)
     """
     
     def __init__(self):
         """Initialize recommendation engine"""
-        self.falkor_service = falkor_personalization_service
+        pass  # No longer needs direct memory access - uses MCP tool
     
     async def get_recommendations(self,
                            user_message: str,
@@ -49,63 +47,75 @@ class RecommendationEngine:
             from app.v1.core.logging_config import get_current_agent_callback
             agent_callback = get_current_agent_callback()
             
-            # Search for relevant episodes using MCP tool (for personalization)
+            # Search for relevant context using Mem0 via MCP tool
             personalization_context = None
-            episodes = []
+            relevant_memories = []
             
             if user_id:
                 try:
-                    # Use search_episodes tool from MCP to find relevant episodes
-                    from app.v1.services.agent_services.tools.mcp_tools import search_episodes_tool
+                    # Use MCP tool to search Mem0 for relevant conversation context
+                    # Wrap sync call in asyncio.to_thread to avoid blocking event loop
+                    import asyncio
+                    from app.v1.services.agent_services.tools.mcp_tools import search_mem0_episodes_sync
                     
-                    episodes_tool = search_episodes_tool()
-                    
-                    # Search episodes related to user query for personalization
-                    episodes_result = await episodes_tool.ainvoke(
-                        {
-                            "query_text": user_message,
-                            "user_id": user_id,
-                            "limit": 5
-                        },
-                        config={"callbacks": [agent_callback]} if agent_callback else {}
+                    # Run sync function in thread pool to avoid blocking async event loop
+                    search_result = await asyncio.to_thread(
+                        search_mem0_episodes_sync,
+                        search_query=user_message,
+                        user_id=user_id,
+                        limit=2
                     )
                     
-                    episodes = episodes_result.get("episodes", []) if isinstance(episodes_result, dict) else []
-                    
+                    # Parse MCP tool response format
+                    episodes = search_result.get("episodes", [])
                     if episodes:
+                        # Convert episodes format to memories format
+                        relevant_memories = []
+                        for episode in episodes:
+                            # Extract memory content from episode format
+                            memory_content = episode.get("episode_body", "") or episode.get("memory", "")
+                            if memory_content:
+                                relevant_memories.append({
+                                    "memory": memory_content,
+                                    "content": memory_content,
+                                    "metadata": episode.get("metadata", {}),
+                                    "score": episode.get("score", 0.0)
+                                })
+                    
+                    if relevant_memories:
                         personalization_context = {
                             "user_id": user_id,
-                            "episodes": episodes,
+                            "memories": relevant_memories,
                             "has_data": True
                         }
-                        logger.info(f"✅ Found {len(episodes)} relevant episodes for personalization")
+                        logger.info(f"✅ Found {len(relevant_memories)} relevant memories via MCP tool for personalization")
                     else:
-                        logger.info("📊 No relevant episodes found for personalization")
+                        logger.info("📊 No relevant memories found for personalization")
                         personalization_context = {
                             "user_id": user_id,
-                            "episodes": [],
+                            "memories": [],
                             "has_data": False
                         }
                 except Exception as e:
-                    logger.warning(f"⚠️ RECOMMENDATION ENGINE: Could not search episodes: {str(e)}")
+                    logger.warning(f"⚠️ RECOMMENDATION ENGINE: Could not search memories via MCP tool: {str(e)}")
                     personalization_context = None
             
-            # Build query với personalization context from episodes
+            # Build query với personalization context from Mem0
             enhanced_query = user_message
             if personalization_context and personalization_context.get("has_data"):
-                episodes = personalization_context.get("episodes", [])
-                if episodes:
-                    # Enhance query with user history from episodes
-                    episode_preferences = []
-                    for ep in episodes[:10]:  # Use top 10 episodes
-                        episode_body = ep.get('episode_body', '') or ep.get('name', '')
-                        if episode_body:
+                memories = personalization_context.get("memories", [])
+                if memories:
+                    # Enhance query with user history from memories
+                    memory_contexts = []
+                    for mem in memories[:5]:  # Use top 5 memories
+                        memory_content = mem.get('memory', '') or mem.get('content', '')
+                        if memory_content:
                             # Extract key preferences (first 100 chars)
-                            episode_preferences.append(episode_body)
+                            memory_contexts.append(memory_content[:100])
                     
-                    if episode_preferences:
-                        enhanced_query = f"{user_message}. Dựa trên lịch sử: {', '.join(episode_preferences)}"
-                        logger.info(f"✅ Enhanced query with {len(episode_preferences)} episode contexts")
+                    if memory_contexts:
+                        enhanced_query = f"{user_message}. Dựa trên lịch sử: {', '.join(memory_contexts)}"
+                        logger.info(f"✅ Enhanced query with {len(memory_contexts)} memory contexts")
             
             # Perform semantic search via MCP tool (for automatic logging via callback handler)
             # Use tool instead of direct mcp_client call so callback handler can log it
@@ -168,9 +178,9 @@ class RecommendationEngine:
             return "Không tìm thấy tour phù hợp. Vui lòng thử với từ khóa khác."
         
         if personalization_context and personalization_context.get("has_data"):
-            episodes = personalization_context.get("episodes", [])
-            if episodes:
-                return f"Dựa trên lịch sử chat của bạn ({len(episodes)} cuộc hội thoại), tôi gợi ý {num_results} tour phù hợp:"
+            memories = personalization_context.get("memories", [])
+            if memories:
+                return f"Dựa trên lịch sử chat của bạn ({len(memories)} cuộc hội thoại), tôi gợi ý {num_results} tour phù hợp:"
             else:
                 return f"Dựa trên sở thích của bạn, tôi tìm thấy {num_results} tour phù hợp:"
         else:
@@ -183,9 +193,7 @@ class RecommendationEngine:
                          assistant_response: str,
                          metadata: Optional[Dict] = None):
         """
-        Track user interaction by adding episode to Graphiti
-        
-        DISABLED: Conversation tracking to Graphiti is currently disabled
+        Track user interaction by storing to Mem0
         
         Args:
             user_id: User ID
@@ -194,9 +202,19 @@ class RecommendationEngine:
             assistant_response: Assistant's response
             metadata: Additional metadata (intent, destinations, etc.)
         """
-        # Disabled: conversation tracking to Graphiti
-        logger.debug(f"📊 Tracking interaction disabled: user {user_id}, conversation {conversation_id}")
-        return
+        try:
+            # Use conversation_memory directly for storage (not via MCP tool)
+            from app.v1.services.agent_services.memory import conversation_memory
+            await conversation_memory.store_episode(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                user_message=user_message,
+                assistant_response=assistant_response,
+                metadata=metadata
+            )
+            logger.info(f"✅ Tracked interaction for user {user_id}, conversation {conversation_id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to track interaction: {str(e)}")
 
 
 # Singleton instance

@@ -50,8 +50,7 @@ class TourPackageResponse(TourPackageBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class TourPackageListResponse(BaseModel):
@@ -99,3 +98,26 @@ class TourPackageBulkCreateResponse(BaseModel):
     created_packages: List[TourPackageResponse] = Field(default=[], description="Danh sách packages đã tạo")
     errors: List[str] = Field(default=[], description="Danh sách lỗi")
     parsing_errors: Optional[List[str]] = Field(default=None, description="Lỗi parse CSV")
+      
+      
+class TourPackageSearchRequest(BaseModel):
+    """Schema for search tour packages request"""
+    q: str = Field(..., min_length=1, description="Từ khóa tìm kiếm (ví dụ: 'Tôi muốn đi Đà Lạt')")
+    max_price: Optional[float] = Field(None, ge=0, description="Giá tối đa (VND)")
+    duration: Optional[int] = Field(None, ge=1, le=30, description="Số ngày tour")
+    destination: Optional[str] = Field(None, description="Lọc theo điểm đến")
+    limit: int = Field(10, ge=1, le=50, description="Số lượng kết quả")
+
+
+class TourPackageRecommendRequest(BaseModel):
+    """Schema for recommend tour packages request"""
+    user_id: str = Field(..., min_length=1, description="User ID để lấy đặc điểm từ Mem0")
+    k: int = Field(5, ge=1, le=10, description="Số lượng tour được recommend (1-10)")
+
+
+class TourPackageSearchResponse(BaseModel):
+    """Schema for search tour packages response"""
+    EC: int = Field(0, description="Error code (0 = success)")
+    EM: str = Field("Success", description="Error message")
+    found: int = Field(..., description="Số lượng tour packages tìm thấy")
+    packages: List[dict] = Field(..., description="Danh sách tour packages với scores")

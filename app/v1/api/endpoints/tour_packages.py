@@ -18,6 +18,9 @@ from ...schema.tour_package_schema import (
     TourPackageUpdateResponse,
     TourPackageDeleteResponse,
     TourPackageBulkCreateResponse
+    TourPackageSearchRequest,
+    TourPackageRecommendRequest,
+    TourPackageSearchResponse
 )
 from ...services.tour_package_service import TourPackageService
 from ...core.supabase import get_supabase_client
@@ -31,6 +34,91 @@ def get_tour_package_service():
     """Dependency to get TourPackageService instance"""
     supabase = get_supabase_client()
     return TourPackageService(supabase)
+
+
+@router.post("/recommend", response_model=TourPackageSearchResponse)
+async def recommend_tour_packages(
+    request: TourPackageRecommendRequest,
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Recommend tour packages dựa trên tour gần hết hạn và đặc điểm user từ Mem0
+    
+    Logic:
+    1. Tìm 10 tour gần hết hạn nhất (dựa vào end_date)
+    2. Lấy đặc điểm user từ Mem0 (preferences, lịch sử tìm kiếm)
+    3. Dùng hybrid search để tìm k tour phù hợp nhất từ 10 tour gần hết hạn
+    
+    Args:
+        request: TourPackageRecommendRequest với user_id và k
+        service: Tour package service instance
+        
+    Returns:
+        TourPackageSearchResponse với danh sách k tour được recommend
+        
+    Example:
+        POST /api/v1/tour-packages/recommend
+        Body:
+        {
+            "user_id": "user123",
+            "k": 5
+        }
+    """
+    try:
+        result = await service.recommend_packages(
+            user_id=request.user_id,
+            k=request.k
+        )
+        return TourPackageSearchResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error in recommend_tour_packages endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/search", response_model=TourPackageSearchResponse)
+async def search_tour_packages(
+    request: TourPackageSearchRequest,
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Tìm kiếm tour packages sử dụng hybrid search (semantic + keyword + filters)
+    
+    Sử dụng:
+    - Semantic search: Supabase native pgvector search (text-embedding-3-small)
+    - Keyword search: PostgreSQL full-text search trên package_name, destination, description
+    - Filters: Database-level filters cho price, duration, destination
+    - Scoring: Weighted combination (0.7 semantic + 0.3 keyword)
+    
+    Args:
+        request: TourPackageSearchRequest với query và filters
+        service: Tour package service instance
+        
+    Returns:
+        TourPackageSearchResponse với danh sách tour packages và scores
+        
+    Example:
+        POST /api/v1/tour-packages/search
+        Body:
+        {
+            "q": "Tôi muốn đi Đà Lạt",
+            "max_price": 3000000,
+            "limit": 10
+        }
+    """
+    try:
+        result = await service.search_packages(
+            user_message=request.q,
+            max_price=request.max_price,
+            duration=request.duration,
+            destination=request.destination,
+            limit=request.limit
+        )
+        return TourPackageSearchResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error in search_tour_packages endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/", response_model=TourPackageListResponse)

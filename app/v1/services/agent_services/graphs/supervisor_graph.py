@@ -8,6 +8,20 @@ from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 import logging
+import os
+
+# Try to import checkpointer for conversation memory
+try:
+    from langgraph.checkpoint.memory import MemorySaver
+    HAS_MEMORY_SAVER = True
+except ImportError:
+    try:
+        from langgraph.checkpoint import MemorySaver
+        HAS_MEMORY_SAVER = True
+    except ImportError:
+        HAS_MEMORY_SAVER = False
+        logger = logging.getLogger(__name__)
+        logger.warning("⚠️ MemorySaver not available - conversation history won't be persisted")
 
 from app.v1.services.agent_services.state import AgentState
 from app.v1.services.agent_services.nodes import ChatAgentNodes, RecommendationAgentNodes
@@ -32,6 +46,12 @@ class SupervisorGraph:
     Architecture:
     - Chat Agent: Handles conversation with tool calling loop
     - Recommendation Agent: Provides tour recommendations (called by Chat Agent via tool)
+    
+    Memory Management:
+    - Uses LangGraph MemorySaver checkpointer for conversation history persistence
+    - Each conversation_id acts as a thread_id for state management
+    - All messages and context are automatically saved per conversation
+    - Agent remembers full conversation history across requests
     
     Flow:
     1. START → chat_llm (LLM decides to use tools or respond)
@@ -68,7 +88,6 @@ class SupervisorGraph:
         self.chat_nodes = ChatAgentNodes(self.llm)
         self.recommendation_nodes = RecommendationAgentNodes()
         self.graph = self._build_graph()
-        logger.info("✅ Supervisor Graph initialized")
     
     def _build_graph(self) -> StateGraph:
         """
@@ -96,21 +115,28 @@ class SupervisorGraph:
                 END: END
             }
         )
-        
-        # After tool execution: check if recommendation was requested
+
+        # Conditional routing after tools execution
         workflow.add_conditional_edges(
             "chat_tools",
             self.chat_nodes.should_recommend,
             {
                 "recommendation_agent": "recommendation_agent",
-                "chat_llm": "chat_llm"  # Loop back if no recommendation needed
+                "chat_llm": "chat_llm"
             }
         )
         
         # After recommendation agent, go back to Chat Agent to generate final response
         workflow.add_edge("recommendation_agent", "chat_llm")
         
-        return workflow.compile()
+        # Compile with memory checkpointer for conversation history persistence
+        if HAS_MEMORY_SAVER:
+            # Enable conversation memory
+            self.memory = MemorySaver()
+            return workflow.compile(checkpointer=self.memory)
+        else:
+            logger.warning("⚠️ Compiling without checkpointer - no conversation history persistence")
+            return workflow.compile()
     
     async def process_message(
         self,
@@ -167,35 +193,13 @@ class SupervisorGraph:
                 }
             }
             
+            # Log memory checkpoint info
+            logger.info(f"📝 Loading conversation state for thread_id: {conversation_id}")
+            
             final_state = await self.graph.ainvoke(initial_state, config)
             
             # Extract final response
             final_response = final_state.get("final_response", "") or final_state.get("chat_response", "")
-            
-            # Log final response in a nice format
-            try:
-                from colorama import Fore, Style
-                COLORAMA_AVAILABLE = True
-            except ImportError:
-                COLORAMA_AVAILABLE = False
-                class Fore:
-                    CYAN = '\033[96m'
-                    GREEN = '\033[92m'
-                    RESET = '\033[0m'
-                class Style:
-                    BRIGHT = '\033[1m'
-                    RESET_ALL = '\033[0m'
-            
-            if COLORAMA_AVAILABLE:
-                print(f"\n{Fore.CYAN}{Style.BRIGHT}{'='*60}{Style.RESET_ALL}", flush=True)
-                print(f"{Fore.CYAN}{Style.BRIGHT}> Final Response:{Style.RESET_ALL}", flush=True)
-                print(f"{Fore.GREEN}{final_response}{Style.RESET_ALL}", flush=True)
-                print(f"{Fore.CYAN}{Style.BRIGHT}{'='*60}{Style.RESET_ALL}\n", flush=True)
-            else:
-                print(f"\n{'='*60}", flush=True)
-                print(f"> Final Response:", flush=True)
-                print(f"{final_response}", flush=True)
-                print(f"{'='*60}\n", flush=True)
             
             return {
                 "response": final_response,
@@ -216,6 +220,75 @@ class SupervisorGraph:
                 "user_id": user_id,
                 "recommendations": [],
                 "error": str(e)
+            }
+
+    async def process_message_stream(
+        self,
+        user_message: str,
+        conversation_history: list = None,
+        conversation_id: str = "default_conv",
+        user_id: str = "anonymous_user"
+    ):
+        """
+        Process user message through multi-agent system with streaming
+        
+        Args:
+            user_message: User's input
+            conversation_history: Previous messages
+            conversation_id: Conversation ID for tracking
+            user_id: User ID for personalization
+            
+        Yields:
+            Stream events from LangGraph execution
+        """
+        # Initialize state
+        initial_state = AgentState(
+            messages=[HumanMessage(content=user_message)],
+            conversation_id=conversation_id,
+            user_id=user_id,
+            chat_response="",
+            needs_recommendation=False,
+            recommendation_params={},
+            recommended_package_ids=[],
+            final_response=""
+        )
+        
+        # Add conversation history if provided
+        if conversation_history:
+            history_messages = []
+            for msg in conversation_history:
+                if isinstance(msg, dict):
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    if role == "user":
+                        history_messages.append(HumanMessage(content=content))
+                    elif role == "assistant":
+                        history_messages.append(HumanMessage(content=content))
+            
+            if history_messages:
+                initial_state["messages"] = history_messages + initial_state["messages"]
+        
+        # Stream graph execution
+        config = {
+            "configurable": {
+                "thread_id": conversation_id,
+                "max_iterations": agent_config.max_iterations
+            }
+        }
+        
+        logger.info(f"📝 Streaming conversation for thread_id: {conversation_id}")
+        
+        try:
+            async for event in self.graph.astream_events(initial_state, config, version="v2"):
+                yield event
+                
+        except Exception as e:
+            logger.error(f"❌ Error streaming message: {str(e)}")
+            yield {
+                "event": "error",
+                "data": {
+                    "error": str(e)
+                }
             }
 
 
