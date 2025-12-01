@@ -2,9 +2,12 @@
 Tour Package API Endpoints
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from typing import Optional
 from uuid import UUID
+import csv
+import io
+from datetime import date, datetime
 
 from ...schema.tour_package_schema import (
     TourPackageCreate,
@@ -13,7 +16,8 @@ from ...schema.tour_package_schema import (
     TourPackageDetailResponse,
     TourPackageCreateResponse,
     TourPackageUpdateResponse,
-    TourPackageDeleteResponse
+    TourPackageDeleteResponse,
+    TourPackageBulkCreateResponse
 )
 from ...services.tour_package_service import TourPackageService
 from ...core.supabase import get_supabase_client
@@ -243,3 +247,143 @@ async def delete_tour_package(
     except Exception as e:
         logger.error(f"Error in delete_tour_package endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bulk/csv", response_model=TourPackageBulkCreateResponse, status_code=201)
+async def create_tour_packages_from_csv(
+    file: UploadFile = File(..., description="CSV file chứa dữ liệu tour packages"),
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Tạo nhiều tour packages từ file CSV
+    
+    CSV file phải có các cột sau (header):
+    - package_name: Tên gói tour (bắt buộc)
+    - destination: Điểm đến (bắt buộc)
+    - description: Mô tả chi tiết (bắt buộc)
+    - duration_days: Số ngày tour (bắt buộc, số nguyên > 0)
+    - price: Giá tour (bắt buộc, số thực > 0)
+    - available_slots: Số chỗ còn trống (bắt buộc, số nguyên >= 0)
+    - start_date: Ngày bắt đầu (bắt buộc, định dạng: YYYY-MM-DD)
+    - end_date: Ngày kết thúc (bắt buộc, định dạng: YYYY-MM-DD)
+    - image_urls: URL hình ảnh (tùy chọn, phân cách bằng |)
+    - cuisine: Ẩm thực (tùy chọn)
+    - suitable_for: Phù hợp cho (tùy chọn)
+    - is_active: Trạng thái kích hoạt (tùy chọn, true/false, mặc định: true)
+    
+    Args:
+        file: File CSV upload
+        service: Tour package service instance
+        
+    Returns:
+        TourPackageBulkCreateResponse với thống kê kết quả
+        
+    Example:
+        POST /api/v1/tour-packages/bulk/csv
+        Content-Type: multipart/form-data
+        Body: CSV file
+    """
+    try:
+        # Kiểm tra file type
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="File phải có định dạng CSV")
+        
+        # Đọc nội dung file
+        contents = await file.read()
+        csv_text = contents.decode('utf-8-sig')  # utf-8-sig để xử lý BOM
+        csv_reader = csv.DictReader(io.StringIO(csv_text))
+        
+        # Kiểm tra header
+        required_fields = [
+            'package_name', 'destination', 'description', 'duration_days',
+            'price', 'available_slots', 'start_date', 'end_date'
+        ]
+        
+        if not csv_reader.fieldnames:
+            raise HTTPException(status_code=400, detail="File CSV không có header")
+        
+        missing_fields = [field for field in required_fields if field not in csv_reader.fieldnames]
+        if missing_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Thiếu các cột bắt buộc: {', '.join(missing_fields)}"
+            )
+        
+        # Parse và validate từng dòng
+        packages_data = []
+        errors = []
+        row_num = 1  # Bắt đầu từ 1 (sau header)
+        
+        for row in csv_reader:
+            row_num += 1
+            try:
+                # Parse và validate dữ liệu
+                package_data = {
+                    'package_name': row['package_name'].strip(),
+                    'destination': row['destination'].strip(),
+                    'description': row['description'].strip(),
+                    'duration_days': int(row['duration_days']),
+                    'price': float(row['price']),
+                    'available_slots': int(row['available_slots']),
+                    'start_date': datetime.strptime(row['start_date'].strip(), '%Y-%m-%d').date().isoformat(),
+                    'end_date': datetime.strptime(row['end_date'].strip(), '%Y-%m-%d').date().isoformat(),
+                }
+                
+                # Optional fields
+                if row.get('image_urls'):
+                    package_data['image_urls'] = row['image_urls'].strip()
+                
+                if row.get('cuisine'):
+                    package_data['cuisine'] = row['cuisine'].strip()
+                
+                if row.get('suitable_for'):
+                    package_data['suitable_for'] = row['suitable_for'].strip()
+                
+                # Parse is_active
+                if row.get('is_active'):
+                    is_active_str = row['is_active'].strip().lower()
+                    package_data['is_active'] = is_active_str in ['true', '1', 'yes', 'y']
+                else:
+                    package_data['is_active'] = True
+                
+                # Validation
+                if not package_data['package_name']:
+                    raise ValueError("package_name không được để trống")
+                if not package_data['destination']:
+                    raise ValueError("destination không được để trống")
+                if not package_data['description']:
+                    raise ValueError("description không được để trống")
+                if package_data['duration_days'] <= 0:
+                    raise ValueError("duration_days phải lớn hơn 0")
+                if package_data['price'] <= 0:
+                    raise ValueError("price phải lớn hơn 0")
+                if package_data['available_slots'] < 0:
+                    raise ValueError("available_slots phải lớn hơn hoặc bằng 0")
+                
+                packages_data.append(package_data)
+                
+            except ValueError as e:
+                errors.append(f"Dòng {row_num}: {str(e)}")
+            except Exception as e:
+                errors.append(f"Dòng {row_num}: Lỗi parse dữ liệu - {str(e)}")
+        
+        if not packages_data:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Không có dữ liệu hợp lệ để tạo. Lỗi: {'; '.join(errors)}"
+            )
+        
+        # Tạo packages qua service
+        result = await service.create_packages_bulk(packages_data)
+        
+        # Thêm parsing errors vào kết quả
+        if errors:
+            result['parsing_errors'] = errors
+        
+        return TourPackageBulkCreateResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in create_tour_packages_from_csv endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Lỗi xử lý file CSV: {str(e)}")

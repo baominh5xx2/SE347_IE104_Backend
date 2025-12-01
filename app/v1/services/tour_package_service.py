@@ -393,3 +393,81 @@ class TourPackageService:
                 "EC": 2,
                 "EM": f"Error deleting tour package: {str(e)}"
             }
+    
+    async def create_packages_bulk(self, packages_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Create multiple tour packages from bulk data
+        
+        Args:
+            packages_data: List of dictionaries containing tour package data
+            
+        Returns:
+            Dict with EC, EM, statistics and results
+        """
+        try:
+            created_packages = []
+            errors = []
+            
+            for idx, package_data in enumerate(packages_data, start=1):
+                try:
+                    # Add timestamps
+                    now = datetime.now(timezone.utc).isoformat()
+                    package_data['created_at'] = now
+                    package_data['updated_at'] = now
+                    
+                    # Insert package
+                    result = self.supabase.table('tour_packages') \
+                        .insert(package_data) \
+                        .execute()
+                    
+                    if result.data:
+                        created_package = result.data[0]
+                        package_id = created_package.get("package_id")
+                        
+                        # Generate and store embedding
+                        try:
+                            embedding = await self._generate_embedding(created_package)
+                            if embedding:
+                                await self._upsert_embedding(package_id, embedding)
+                                logger.info(f"✓ Package {idx}: Created with embedding - {created_package.get('package_name')}")
+                            else:
+                                logger.warning(f"⚠ Package {idx}: Created without embedding - {created_package.get('package_name')}")
+                        except Exception as embed_error:
+                            logger.error(f"✗ Package {idx}: Embedding error - {str(embed_error)}")
+                        
+                        created_packages.append(created_package)
+                    else:
+                        error_msg = f"Package {idx}: Failed to insert - {package_data.get('package_name', 'Unknown')}"
+                        errors.append(error_msg)
+                        logger.error(error_msg)
+                        
+                except Exception as e:
+                    error_msg = f"Package {idx}: {str(e)} - {package_data.get('package_name', 'Unknown')}"
+                    errors.append(error_msg)
+                    logger.error(f"Error creating package {idx}: {str(e)}")
+            
+            total_processed = len(packages_data)
+            successful = len(created_packages)
+            failed = len(errors)
+            
+            return {
+                "EC": 0 if failed == 0 else 1,
+                "EM": f"Processed {total_processed} packages: {successful} successful, {failed} failed",
+                "total_processed": total_processed,
+                "successful": successful,
+                "failed": failed,
+                "created_packages": created_packages,
+                "errors": errors
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in bulk package creation: {str(e)}")
+            return {
+                "EC": 2,
+                "EM": f"Error in bulk creation: {str(e)}",
+                "total_processed": len(packages_data),
+                "successful": 0,
+                "failed": len(packages_data),
+                "created_packages": [],
+                "errors": [str(e)]
+            }
