@@ -7,12 +7,15 @@ from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from datetime import datetime, date, timezone
 from uuid import uuid4, UUID
 import logging
+import csv
+import io
 
 from app.v1.services.tour_package_service import TourPackageService
 from app.v1.schema.tour_package_schema import (
     TourPackageCreate,
     TourPackageUpdate,
-    TourPackageResponse
+    TourPackageResponse,
+    TourPackageBulkCreateResponse
 )
 
 # Setup logging for tests
@@ -82,6 +85,41 @@ def sample_tour_response():
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
+
+
+@pytest.fixture
+def sample_bulk_data():
+    """Sample bulk tour package data"""
+    return [
+        {
+            "package_name": "Tour Đà Lạt 3N2Đ",
+            "destination": "Đà Lạt",
+            "description": "Khám phá thành phố ngàn hoa",
+            "duration_days": 3,
+            "price": 2500000.0,
+            "available_slots": 20,
+            "start_date": "2024-12-15",
+            "end_date": "2024-12-17",
+            "image_urls": "https://example.com/dalat1.jpg",
+            "cuisine": "Ẩm thực miền Trung",
+            "suitable_for": "Gia đình",
+            "is_active": True
+        },
+        {
+            "package_name": "Tour Nha Trang Biển Xanh",
+            "destination": "Nha Trang",
+            "description": "Tận hưởng biển đảo xinh đẹp",
+            "duration_days": 4,
+            "price": 3500000.0,
+            "available_slots": 25,
+            "start_date": "2024-12-20",
+            "end_date": "2024-12-23",
+            "image_urls": "https://example.com/nhatrang1.jpg",
+            "cuisine": "Hải sản tươi sống",
+            "suitable_for": "Cặp đôi",
+            "is_active": True
+        }
+    ]
 
 
 # ==================== Test Get All Packages ====================
@@ -928,6 +966,311 @@ async def test_update_package_dates(tour_service, sample_tour_response):
         assert result["package"]["end_date"] == "2025-01-17"
         
         logger.info("✓ Test update dates passed")
+
+
+# ==================== Test Bulk Create from CSV ====================
+
+@pytest.mark.asyncio
+async def test_create_packages_bulk_success(tour_service, sample_bulk_data):
+    """Test bulk creating tour packages successfully"""
+    service, mock_table = tour_service
+    
+    # Mock embedding generation
+    with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+        with patch.object(service, '_upsert_embedding', return_value=True):
+            # Mock insert responses
+            def mock_insert_execute():
+                mock_exec = Mock()
+                # Return package with generated ID
+                package_data = sample_bulk_data[0].copy()
+                package_data['package_id'] = str(uuid4())
+                package_data['created_at'] = datetime.now(timezone.utc).isoformat()
+                package_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+                mock_exec.data = [package_data]
+                return mock_exec
+            
+            mock_table.insert.return_value.execute.side_effect = [
+                mock_insert_execute(),
+                mock_insert_execute()
+            ]
+            
+            # Execute
+            result = await service.create_packages_bulk(sample_bulk_data)
+            
+            # Assertions
+            assert result["EC"] == 0
+            assert result["total_processed"] == 2
+            assert result["successful"] == 2
+            assert result["failed"] == 0
+            assert len(result["created_packages"]) == 2
+            assert len(result["errors"]) == 0
+            
+            logger.info("✓ Test bulk create success passed")
+
+
+@pytest.mark.asyncio
+async def test_create_packages_bulk_partial_success(tour_service, sample_bulk_data):
+    """Test bulk create with some packages failing"""
+    service, mock_table = tour_service
+    
+    # Mock embedding generation
+    with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+        with patch.object(service, '_upsert_embedding', return_value=True):
+            # Mock insert - first succeeds, second fails
+            def mock_success():
+                mock_exec = Mock()
+                package_data = sample_bulk_data[0].copy()
+                package_data['package_id'] = str(uuid4())
+                package_data['created_at'] = datetime.now(timezone.utc).isoformat()
+                package_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+                mock_exec.data = [package_data]
+                return mock_exec
+            
+            def mock_failure():
+                mock_exec = Mock()
+                mock_exec.data = []
+                return mock_exec
+            
+            mock_table.insert.return_value.execute.side_effect = [
+                mock_success(),
+                mock_failure()
+            ]
+            
+            # Execute
+            result = await service.create_packages_bulk(sample_bulk_data)
+            
+            # Assertions
+            assert result["EC"] == 1  # Has failures
+            assert result["total_processed"] == 2
+            assert result["successful"] == 1
+            assert result["failed"] == 1
+            assert len(result["created_packages"]) == 1
+            assert len(result["errors"]) == 1
+            
+            logger.info("✓ Test bulk create partial success passed")
+
+
+@pytest.mark.asyncio
+async def test_create_packages_bulk_all_fail(tour_service, sample_bulk_data):
+    """Test bulk create when all packages fail"""
+    service, mock_table = tour_service
+    
+    # Mock all inserts failing
+    mock_exec = Mock()
+    mock_exec.data = []
+    mock_table.insert.return_value.execute.return_value = mock_exec
+    
+    # Execute
+    result = await service.create_packages_bulk(sample_bulk_data)
+    
+    # Assertions
+    assert result["EC"] == 1
+    assert result["total_processed"] == 2
+    assert result["successful"] == 0
+    assert result["failed"] == 2
+    assert len(result["created_packages"]) == 0
+    assert len(result["errors"]) == 2
+    
+    logger.info("✓ Test bulk create all fail passed")
+
+
+@pytest.mark.asyncio
+async def test_create_packages_bulk_with_embedding_failure(tour_service, sample_bulk_data):
+    """Test bulk create when embedding generation fails"""
+    service, mock_table = tour_service
+    
+    # Mock embedding generation failing
+    with patch.object(service, '_generate_embedding', return_value=None):
+        # Mock successful insert
+        def mock_insert_execute():
+            mock_exec = Mock()
+            package_data = sample_bulk_data[0].copy()
+            package_data['package_id'] = str(uuid4())
+            package_data['created_at'] = datetime.now(timezone.utc).isoformat()
+            package_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+            mock_exec.data = [package_data]
+            return mock_exec
+        
+        mock_table.insert.return_value.execute.side_effect = [
+            mock_insert_execute(),
+            mock_insert_execute()
+        ]
+        
+        # Execute
+        result = await service.create_packages_bulk(sample_bulk_data)
+        
+        # Assertions - packages should still be created even if embedding fails
+        assert result["EC"] == 0
+        assert result["successful"] == 2
+        assert len(result["created_packages"]) == 2
+        
+        logger.info("✓ Test bulk create with embedding failure passed")
+
+
+@pytest.mark.asyncio
+async def test_create_packages_bulk_empty_list(tour_service):
+    """Test bulk create with empty list"""
+    service, mock_table = tour_service
+    
+    # Execute with empty list
+    result = await service.create_packages_bulk([])
+    
+    # Assertions
+    assert result["EC"] == 0
+    assert result["total_processed"] == 0
+    assert result["successful"] == 0
+    assert result["failed"] == 0
+    
+    logger.info("✓ Test bulk create empty list passed")
+
+
+@pytest.mark.asyncio
+async def test_create_packages_bulk_exception_handling(tour_service, sample_bulk_data):
+    """Test bulk create with database exception for each package"""
+    service, mock_table = tour_service
+    
+    # Mock database error for each insert
+    mock_table.insert.side_effect = Exception("Database connection error")
+    
+    # Execute
+    result = await service.create_packages_bulk(sample_bulk_data)
+    
+    # Assertions - EC should be 1 (has failures) not 2, as each package error is caught individually
+    assert result["EC"] == 1
+    assert result["total_processed"] == 2
+    assert result["successful"] == 0
+    assert result["failed"] == 2
+    assert len(result["errors"]) == 2
+    assert "Database connection error" in result["errors"][0]
+    
+    logger.info("✓ Test bulk create exception handling passed")
+
+
+@pytest.mark.asyncio
+async def test_create_packages_bulk_single_package(tour_service, sample_bulk_data):
+    """Test bulk create with single package"""
+    service, mock_table = tour_service
+    
+    # Mock embedding generation
+    with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+        with patch.object(service, '_upsert_embedding', return_value=True):
+            # Mock insert response
+            mock_exec = Mock()
+            package_data = sample_bulk_data[0].copy()
+            package_data['package_id'] = str(uuid4())
+            package_data['created_at'] = datetime.now(timezone.utc).isoformat()
+            package_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+            mock_exec.data = [package_data]
+            mock_table.insert.return_value.execute.return_value = mock_exec
+            
+            # Execute with single package
+            result = await service.create_packages_bulk([sample_bulk_data[0]])
+            
+            # Assertions
+            assert result["EC"] == 0
+            assert result["total_processed"] == 1
+            assert result["successful"] == 1
+            assert result["failed"] == 0
+            
+            logger.info("✓ Test bulk create single package passed")
+
+
+@pytest.mark.asyncio
+async def test_create_packages_bulk_large_batch(tour_service):
+    """Test bulk create with large batch of packages"""
+    service, mock_table = tour_service
+    
+    # Create 50 packages
+    large_batch = []
+    for i in range(50):
+        large_batch.append({
+            "package_name": f"Tour {i}",
+            "destination": f"Destination {i}",
+            "description": f"Description {i}",
+            "duration_days": 3,
+            "price": 2000000.0 + (i * 100000),
+            "available_slots": 20,
+            "start_date": "2024-12-15",
+            "end_date": "2024-12-17",
+            "is_active": True
+        })
+    
+    # Mock embedding generation
+    with patch.object(service, '_generate_embedding', return_value=[0.1] * 1536):
+        with patch.object(service, '_upsert_embedding', return_value=True):
+            # Mock successful inserts
+            def mock_insert_execute():
+                mock_exec = Mock()
+                mock_exec.data = [{
+                    "package_id": str(uuid4()),
+                    "package_name": "Test",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }]
+                return mock_exec
+            
+            mock_table.insert.return_value.execute.side_effect = [
+                mock_insert_execute() for _ in range(50)
+            ]
+            
+            # Execute
+            result = await service.create_packages_bulk(large_batch)
+            
+            # Assertions
+            assert result["EC"] == 0
+            assert result["total_processed"] == 50
+            assert result["successful"] == 50
+            assert result["failed"] == 0
+            
+            logger.info("✓ Test bulk create large batch passed")
+
+
+# ==================== Test Bulk Create Response Schema ====================
+
+def test_bulk_create_response_schema():
+    """Test TourPackageBulkCreateResponse schema"""
+    data = {
+        "EC": 0,
+        "EM": "Success",
+        "total_processed": 5,
+        "successful": 5,
+        "failed": 0,
+        "created_packages": [],
+        "errors": []
+    }
+    
+    response = TourPackageBulkCreateResponse(**data)
+    
+    assert response.EC == 0
+    assert response.total_processed == 5
+    assert response.successful == 5
+    assert response.failed == 0
+    
+    logger.info("✓ Test bulk create response schema passed")
+
+
+def test_bulk_create_response_schema_with_errors():
+    """Test TourPackageBulkCreateResponse schema with errors"""
+    data = {
+        "EC": 1,
+        "EM": "Partial success",
+        "total_processed": 5,
+        "successful": 3,
+        "failed": 2,
+        "created_packages": [],
+        "errors": ["Error 1", "Error 2"],
+        "parsing_errors": ["Parse error 1"]
+    }
+    
+    response = TourPackageBulkCreateResponse(**data)
+    
+    assert response.EC == 1
+    assert response.successful == 3
+    assert response.failed == 2
+    assert len(response.errors) == 2
+    assert len(response.parsing_errors) == 1
+    
+    logger.info("✓ Test bulk create response with errors passed")
 
 
 # ==================== Run Tests Summary ====================

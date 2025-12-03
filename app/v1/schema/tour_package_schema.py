@@ -88,6 +88,18 @@ class TourPackageDeleteResponse(BaseModel):
     EM: str = Field("Success", description="Error message")
 
 
+class TourPackageBulkCreateResponse(BaseModel):
+    """Schema for bulk create tour packages response"""
+    EC: int = Field(0, description="Error code (0 = success)")
+    EM: str = Field("Success", description="Error message")
+    total_processed: int = Field(..., description="Tổng số dòng được xử lý")
+    successful: int = Field(..., description="Số lượng tạo thành công")
+    failed: int = Field(..., description="Số lượng tạo thất bại")
+    created_packages: List[TourPackageResponse] = Field(default=[], description="Danh sách packages đã tạo")
+    errors: List[str] = Field(default=[], description="Danh sách lỗi")
+    parsing_errors: Optional[List[str]] = Field(default=None, description="Lỗi parse CSV")
+      
+      
 class TourPackageSearchRequest(BaseModel):
     """Schema for search tour packages request"""
     q: str = Field(..., min_length=1, description="Từ khóa tìm kiếm (ví dụ: 'Tôi muốn đi Đà Lạt')")
