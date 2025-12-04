@@ -15,6 +15,7 @@ class BookingBase(BaseModel):
     contact_phone: str = Field(..., min_length=10, max_length=20, description="Số điện thoại liên hệ")
     special_requests: Optional[str] = Field(None, max_length=500, description="Yêu cầu đặc biệt")
     user_id: UUID = Field(..., description="ID của người dùng đặt tour")
+    promotion_id: Optional[UUID] = Field(None, description="ID của mã khuyến mãi (nếu có)")
 
 
 class BookingCreate(BookingBase):
@@ -27,7 +28,8 @@ class BookingCreate(BookingBase):
                 "contact_name": "Nguyen Van B",
                 "contact_phone": "0123456789",
                 "special_requests": "Phòng view đẹp",
-                "user_id": "9b3d0691-eccd-4a81-9f43-383f5be344b8"
+                "user_id": "9b3d0691-eccd-4a81-9f43-383f5be344b8",
+                "promotion_id": "550e8400-e29b-41d4-a716-446655440000"
             }
         }
     )
@@ -39,6 +41,7 @@ class BookingUpdate(BaseModel):
             "example": {
                 "number_of_people": 3,
                 "contact_phone": "0987654321",
+                "promotion_id": "550e8400-e29b-41d4-a716-446655440000",
                 "status": "confirmed"
             }
         }
@@ -48,13 +51,21 @@ class BookingUpdate(BaseModel):
     contact_name: Optional[str] = Field(None, min_length=2, max_length=100, description="Tên người liên hệ")
     contact_phone: Optional[str] = Field(None, min_length=10, max_length=20, description="Số điện thoại")
     special_requests: Optional[str] = Field(None, max_length=500, description="Yêu cầu đặc biệt")
+    promotion_id: Optional[UUID] = Field(None, description="ID mã khuyến mãi (total_amount sẽ tự động tính lại)")
     status: Optional[str] = Field(None, description="Trạng thái booking (pending/confirmed/cancelled/completed)")
 
 
-class BookingResponse(BookingBase):
+class BookingResponse(BaseModel):
     """Schema for booking response"""
     booking_id: UUID
-    total_amount: float = Field(..., description="Tổng số tiền (tự động tính)")
+    package_id: UUID
+    user_id: UUID
+    number_of_people: int
+    total_amount: float = Field(..., description="Tổng số tiền sau khuyến mãi")
+    contact_name: str
+    contact_phone: str
+    special_requests: Optional[str]
+    promotion_id: Optional[UUID] = Field(None, description="ID mã khuyến mãi đã áp dụng")
     status: str
     created_at: datetime
     updated_at: datetime

@@ -1,0 +1,619 @@
+"""
+Test cases for Promotion Service
+"""
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
+from datetime import datetime, timedelta
+
+from app.v1.services.promotion_service import PromotionService
+
+
+@pytest.fixture
+def mock_supabase():
+    """Mock Supabase client"""
+    return MagicMock()
+
+
+@pytest.fixture
+def promotion_service(mock_supabase):
+    """Create PromotionService instance with mock client"""
+    return PromotionService(mock_supabase)
+
+
+@pytest.fixture
+def sample_promotion_data():
+    """Sample promotion data for testing"""
+    now = datetime.now()
+    return {
+        "name": "Summer Sale 2024",
+        "description": "Giảm giá mùa hè",
+        "discount_type": "PERCENTAGE",
+        "discount_value": 15,
+        "start_date": now.isoformat(),
+        "end_date": (now + timedelta(days=30)).isoformat(),
+        "quantity": 100,
+        "is_active": True
+    }
+
+
+@pytest.fixture
+def sample_promotion_response():
+    """Sample promotion response from database"""
+    promotion_id = str(uuid4())
+    now = datetime.now()
+    
+    return {
+        "promotion_id": promotion_id,
+        "name": "Summer Sale 2024",
+        "description": "Giảm giá mùa hè",
+        "discount_type": "PERCENTAGE",
+        "discount_value": 15,
+        "start_date": now.isoformat(),
+        "end_date": (now + timedelta(days=30)).isoformat(),
+        "quantity": 100,
+        "used_count": 0,
+        "is_active": True
+    }
+
+
+# Test create_promotion
+@pytest.mark.asyncio
+async def test_create_promotion_success(promotion_service, mock_supabase, sample_promotion_data, sample_promotion_response):
+    """Test creating promotion successfully"""
+    mock_result = MagicMock()
+    mock_result.data = [sample_promotion_response]
+    
+    mock_query = MagicMock()
+    mock_query.insert.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.create_promotion(sample_promotion_data)
+    
+    assert result["EC"] == 0
+    assert result["EM"] == "Promotion created successfully"
+    assert result["promotion"]["promotion_id"] == sample_promotion_response["promotion_id"]
+    assert result["promotion"]["name"] == sample_promotion_data["name"]
+
+
+@pytest.mark.asyncio
+async def test_create_promotion_fixed_amount(promotion_service, mock_supabase):
+    """Test creating promotion with fixed amount discount"""
+    promotion_data = {
+        "name": "Fixed Discount",
+        "description": "Giảm giá cố định",
+        "discount_type": "FIXED_AMOUNT",
+        "discount_value": 500000,
+        "start_date": datetime.now().isoformat(),
+        "end_date": (datetime.now() + timedelta(days=30)).isoformat(),
+        "quantity": 50,
+        "is_active": True
+    }
+    
+    mock_result = MagicMock()
+    mock_result.data = [{**promotion_data, "promotion_id": str(uuid4()), "used_count": 0}]
+    
+    mock_query = MagicMock()
+    mock_query.insert.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.create_promotion(promotion_data)
+    
+    assert result["EC"] == 0
+    assert result["promotion"]["discount_type"] == "FIXED_AMOUNT"
+    assert result["promotion"]["discount_value"] == 500000
+
+
+# Test get_promotion_by_id
+@pytest.mark.asyncio
+async def test_get_promotion_by_id_success(promotion_service, mock_supabase, sample_promotion_response):
+    """Test getting promotion by ID successfully"""
+    mock_result = MagicMock()
+    mock_result.data = [sample_promotion_response]
+    
+    mock_query = MagicMock()
+    mock_query.select.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.get_promotion_by_id(sample_promotion_response["promotion_id"])
+    
+    assert result["EC"] == 0
+    assert result["EM"] == "Promotion found"
+    assert result["promotion"]["promotion_id"] == sample_promotion_response["promotion_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_promotion_by_id_not_found(promotion_service, mock_supabase):
+    """Test getting non-existent promotion"""
+    mock_result = MagicMock()
+    mock_result.data = []
+    
+    mock_query = MagicMock()
+    mock_query.select.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.get_promotion_by_id(str(uuid4()))
+    
+    assert result["EC"] == 1
+    assert "not found" in result["EM"]
+
+
+# Test get_all_promotions
+@pytest.mark.asyncio
+async def test_get_all_promotions_success(promotion_service, mock_supabase, sample_promotion_response):
+    """Test getting all promotions successfully"""
+    mock_result = MagicMock()
+    mock_result.data = [sample_promotion_response]
+    
+    mock_query = MagicMock()
+    mock_query.select.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.get_all_promotions()
+    
+    assert result["EC"] == 0
+    assert result["found"] == 1
+    assert len(result["promotions"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_all_promotions_with_filters(promotion_service, mock_supabase):
+    """Test getting promotions with filters"""
+    mock_result = MagicMock()
+    mock_result.data = []
+    
+    mock_query = MagicMock()
+    mock_query.select.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.range.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.get_all_promotions(
+        is_active=True,
+        limit=10,
+        offset=0
+    )
+    
+    assert result["EC"] == 0
+    assert result["found"] == 0
+
+
+# Test update_promotion
+@pytest.mark.asyncio
+async def test_update_promotion_success(promotion_service, mock_supabase, sample_promotion_response):
+    """Test updating promotion successfully"""
+    updated_data = {"discount_value": 20, "is_active": False}
+    
+    updated_promotion = sample_promotion_response.copy()
+    updated_promotion.update(updated_data)
+    
+    mock_result = MagicMock()
+    mock_result.data = [updated_promotion]
+    
+    mock_query = MagicMock()
+    mock_query.update.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.update_promotion(
+        sample_promotion_response["promotion_id"],
+        updated_data
+    )
+    
+    assert result["EC"] == 0
+    assert result["EM"] == "Promotion updated successfully"
+    assert result["promotion"]["discount_value"] == 20
+    assert result["promotion"]["is_active"] == False
+
+
+@pytest.mark.asyncio
+async def test_update_promotion_not_found(promotion_service, mock_supabase):
+    """Test updating non-existent promotion"""
+    mock_result = MagicMock()
+    mock_result.data = []
+    
+    mock_query = MagicMock()
+    mock_query.update.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.update_promotion(str(uuid4()), {"is_active": False})
+    
+    assert result["EC"] == 1
+    assert "not found" in result["EM"]
+
+
+# Test delete_promotion
+@pytest.mark.asyncio
+async def test_delete_promotion_success(promotion_service, mock_supabase, sample_promotion_response):
+    """Test deleting promotion successfully"""
+    mock_result = MagicMock()
+    mock_result.data = [sample_promotion_response]
+    
+    mock_query = MagicMock()
+    mock_query.delete.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.delete_promotion(sample_promotion_response["promotion_id"])
+    
+    assert result["EC"] == 0
+    assert result["EM"] == "Promotion deleted successfully"
+
+
+@pytest.mark.asyncio
+async def test_delete_promotion_not_found(promotion_service, mock_supabase):
+    """Test deleting non-existent promotion"""
+    mock_result = MagicMock()
+    mock_result.data = []
+    
+    mock_query = MagicMock()
+    mock_query.delete.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.delete_promotion(str(uuid4()))
+    
+    assert result["EC"] == 1
+    assert "not found" in result["EM"]
+
+
+# Test get_available_promotions
+@pytest.mark.asyncio
+async def test_get_available_promotions_success(promotion_service, mock_supabase):
+    """Test getting available promotions"""
+    now = datetime.now()
+    
+    # Create promotions with different statuses
+    promotions = [
+        {
+            "promotion_id": str(uuid4()),
+            "name": "Active Promo",
+            "discount_type": "PERCENTAGE",
+            "discount_value": 10,
+            "start_date": (now - timedelta(days=1)).isoformat(),
+            "end_date": (now + timedelta(days=30)).isoformat(),
+            "quantity": 100,
+            "used_count": 50,
+            "is_active": True
+        },
+        {
+            "promotion_id": str(uuid4()),
+            "name": "Expired Promo",
+            "discount_type": "PERCENTAGE",
+            "discount_value": 15,
+            "start_date": (now - timedelta(days=60)).isoformat(),
+            "end_date": (now - timedelta(days=30)).isoformat(),
+            "quantity": 100,
+            "used_count": 90,
+            "is_active": True
+        },
+        {
+            "promotion_id": str(uuid4()),
+            "name": "Full Promo",
+            "discount_type": "PERCENTAGE",
+            "discount_value": 20,
+            "start_date": (now - timedelta(days=1)).isoformat(),
+            "end_date": (now + timedelta(days=30)).isoformat(),
+            "quantity": 100,
+            "used_count": 100,  # Full
+            "is_active": True
+        }
+    ]
+    
+    mock_result = MagicMock()
+    mock_result.data = promotions
+    
+    mock_query = MagicMock()
+    mock_query.select.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.get_available_promotions()
+    
+    assert result["EC"] == 0
+    # Only first promotion should be valid (not expired, has quantity)
+    assert result["found"] == 1
+    assert result["promotions"][0]["name"] == "Active Promo"
+
+
+@pytest.mark.asyncio
+async def test_get_available_promotions_empty(promotion_service, mock_supabase):
+    """Test getting available promotions when none available"""
+    mock_result = MagicMock()
+    mock_result.data = []
+    
+    mock_query = MagicMock()
+    mock_query.select.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.execute.return_value = mock_result
+    
+    mock_supabase.table.return_value = mock_query
+    
+    result = await promotion_service.get_available_promotions()
+    
+    assert result["EC"] == 0
+    assert result["found"] == 0
+    assert result["promotions"] == []
+
+
+# Test apply_promotion_to_booking
+@pytest.mark.asyncio
+async def test_apply_promotion_percentage_success(promotion_service, mock_supabase):
+    """Test applying percentage promotion successfully"""
+    promotion_id = str(uuid4())
+    now = datetime.now()
+    
+    promotion = {
+        "promotion_id": promotion_id,
+        "name": "10% Discount",
+        "discount_type": "PERCENTAGE",
+        "discount_value": 10,
+        "start_date": (now - timedelta(days=1)).isoformat(),
+        "end_date": (now + timedelta(days=30)).isoformat(),
+        "quantity": 100,
+        "used_count": 50,
+        "is_active": True
+    }
+    
+    # Mock get_promotion_by_id
+    with patch.object(promotion_service, 'get_promotion_by_id', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {
+            "EC": 0,
+            "EM": "Promotion found",
+            "promotion": promotion
+        }
+        
+        # Mock update used_count
+        mock_update_result = MagicMock()
+        mock_update_result.data = [{"used_count": 51}]
+        
+        mock_query = MagicMock()
+        mock_query.update.return_value = mock_query
+        mock_query.eq.return_value = mock_query
+        mock_query.execute.return_value = mock_update_result
+        
+        mock_supabase.table.return_value = mock_query
+        
+        original_price = 5000000
+        result = await promotion_service.apply_promotion_to_booking(promotion_id, original_price)
+        
+        assert result["EC"] == 0
+        assert result["EM"] == "Promotion applied successfully"
+        assert result["final_price"] == 4500000  # 10% discount
+        assert result["discount_amount"] == 500000
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_fixed_amount_success(promotion_service, mock_supabase):
+    """Test applying fixed amount promotion successfully"""
+    promotion_id = str(uuid4())
+    now = datetime.now()
+    
+    promotion = {
+        "promotion_id": promotion_id,
+        "name": "500k Discount",
+        "discount_type": "FIXED_AMOUNT",
+        "discount_value": 500000,
+        "start_date": (now - timedelta(days=1)).isoformat(),
+        "end_date": (now + timedelta(days=30)).isoformat(),
+        "quantity": 50,
+        "used_count": 10,
+        "is_active": True
+    }
+    
+    with patch.object(promotion_service, 'get_promotion_by_id', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {
+            "EC": 0,
+            "EM": "Promotion found",
+            "promotion": promotion
+        }
+        
+        mock_update_result = MagicMock()
+        mock_update_result.data = [{"used_count": 11}]
+        
+        mock_query = MagicMock()
+        mock_query.update.return_value = mock_query
+        mock_query.eq.return_value = mock_query
+        mock_query.execute.return_value = mock_update_result
+        
+        mock_supabase.table.return_value = mock_query
+        
+        original_price = 3000000
+        result = await promotion_service.apply_promotion_to_booking(promotion_id, original_price)
+        
+        assert result["EC"] == 0
+        assert result["final_price"] == 2500000  # Fixed 500k discount
+        assert result["discount_amount"] == 500000
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_expired(promotion_service, mock_supabase):
+    """Test applying expired promotion"""
+    promotion_id = str(uuid4())
+    now = datetime.now()
+    
+    promotion = {
+        "promotion_id": promotion_id,
+        "name": "Expired Promo",
+        "discount_type": "PERCENTAGE",
+        "discount_value": 10,
+        "start_date": (now - timedelta(days=60)).isoformat(),
+        "end_date": (now - timedelta(days=30)).isoformat(),  # Expired
+        "quantity": 100,
+        "used_count": 50,
+        "is_active": True
+    }
+    
+    with patch.object(promotion_service, 'get_promotion_by_id', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {
+            "EC": 0,
+            "EM": "Promotion found",
+            "promotion": promotion
+        }
+        
+        original_price = 5000000
+        result = await promotion_service.apply_promotion_to_booking(promotion_id, original_price)
+        
+        assert result["EC"] == 1
+        assert "expired or not started yet" in result["EM"]
+        assert result["final_price"] == original_price
+        assert result["discount_amount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_not_active(promotion_service, mock_supabase):
+    """Test applying inactive promotion"""
+    promotion_id = str(uuid4())
+    now = datetime.now()
+    
+    promotion = {
+        "promotion_id": promotion_id,
+        "name": "Inactive Promo",
+        "discount_type": "PERCENTAGE",
+        "discount_value": 10,
+        "start_date": (now - timedelta(days=1)).isoformat(),
+        "end_date": (now + timedelta(days=30)).isoformat(),
+        "quantity": 100,
+        "used_count": 50,
+        "is_active": False  # Inactive
+    }
+    
+    with patch.object(promotion_service, 'get_promotion_by_id', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {
+            "EC": 0,
+            "EM": "Promotion found",
+            "promotion": promotion
+        }
+        
+        original_price = 5000000
+        result = await promotion_service.apply_promotion_to_booking(promotion_id, original_price)
+        
+        assert result["EC"] == 1
+        assert "not active" in result["EM"]
+        assert result["final_price"] == original_price
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_no_quantity(promotion_service, mock_supabase):
+    """Test applying promotion with no quantity left"""
+    promotion_id = str(uuid4())
+    now = datetime.now()
+    
+    promotion = {
+        "promotion_id": promotion_id,
+        "name": "Full Promo",
+        "discount_type": "PERCENTAGE",
+        "discount_value": 10,
+        "start_date": (now - timedelta(days=1)).isoformat(),
+        "end_date": (now + timedelta(days=30)).isoformat(),
+        "quantity": 100,
+        "used_count": 100,  # Full
+        "is_active": True
+    }
+    
+    with patch.object(promotion_service, 'get_promotion_by_id', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {
+            "EC": 0,
+            "EM": "Promotion found",
+            "promotion": promotion
+        }
+        
+        original_price = 5000000
+        result = await promotion_service.apply_promotion_to_booking(promotion_id, original_price)
+        
+        assert result["EC"] == 1
+        assert "usage limit" in result["EM"]
+        assert result["final_price"] == original_price
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_not_found(promotion_service, mock_supabase):
+    """Test applying non-existent promotion"""
+    promotion_id = str(uuid4())
+    
+    with patch.object(promotion_service, 'get_promotion_by_id', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {
+            "EC": 1,
+            "EM": "Promotion not found",
+            "promotion": None
+        }
+        
+        original_price = 5000000
+        result = await promotion_service.apply_promotion_to_booking(promotion_id, original_price)
+        
+        assert result["EC"] == 1
+        assert "not found" in result["EM"]
+        assert result["final_price"] == original_price
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_discount_exceeds_price(promotion_service, mock_supabase):
+    """Test promotion discount doesn't exceed original price"""
+    promotion_id = str(uuid4())
+    now = datetime.now()
+    
+    promotion = {
+        "promotion_id": promotion_id,
+        "name": "Big Discount",
+        "discount_type": "FIXED_AMOUNT",
+        "discount_value": 6000000,  # Larger than original price
+        "start_date": (now - timedelta(days=1)).isoformat(),
+        "end_date": (now + timedelta(days=30)).isoformat(),
+        "quantity": 100,
+        "used_count": 0,
+        "is_active": True
+    }
+    
+    with patch.object(promotion_service, 'get_promotion_by_id', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {
+            "EC": 0,
+            "EM": "Promotion found",
+            "promotion": promotion
+        }
+        
+        mock_update_result = MagicMock()
+        mock_update_result.data = [{"used_count": 1}]
+        
+        mock_query = MagicMock()
+        mock_query.update.return_value = mock_query
+        mock_query.eq.return_value = mock_query
+        mock_query.execute.return_value = mock_update_result
+        
+        mock_supabase.table.return_value = mock_query
+        
+        original_price = 5000000
+        result = await promotion_service.apply_promotion_to_booking(promotion_id, original_price)
+        
+        assert result["EC"] == 0
+        # Final price should be 0, not negative
+        assert result["final_price"] == 0
+        assert result["discount_amount"] == original_price
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
