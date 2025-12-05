@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     LANGCHAIN_PROJECT: str = "ai-assistant-backend"  # LangSmith project name
     LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"  # LangSmith API endpoint
     
+    # VNPay Configuration
+    VNPAY_TMN_CODE: str = ""  # Merchant code from VNPay
+    VNPAY_HASH_SECRET: str = ""  # Secret key from VNPay
+    VNPAY_URL: str = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"  # VNPay payment URL
+    VNPAY_RETURN_URL: str = "http://localhost:8000/api/v1/payments/vnpay/return"  # Return URL after payment
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
