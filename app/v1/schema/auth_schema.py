@@ -182,3 +182,47 @@ class GoogleAuthURLResponse(BaseModel):
     EM: str = Field(..., description="Error message")
     auth_url: Optional[str] = None
 
+
+class AdminRegisterRequest(BaseModel):
+    """Admin register request schema"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "full_name": "Admin User",
+                "email": "admin@example.com",
+                "password": "admin123456",
+                "phone_number": "0123456789",
+                "admin_secret_key": "your-secret-key-here"
+            }
+        }
+    )
+    
+    full_name: str = Field(..., min_length=2, max_length=100, description="Full name of the admin")
+    email: EmailStr = Field(..., description="Email address")
+    password: str = Field(..., min_length=6, description="Password (minimum 6 characters)")
+    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number")
+    admin_secret_key: Optional[str] = Field(None, description="Secret key để verify quyền tạo admin")
+
+
+class AdminLoginRequest(BaseModel):
+    """Admin login request schema - can login with either email or phone_number"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "admin@example.com",
+                "phone_number": "0123456789",
+                "password": "admin123456"
+            }
+        }
+    )
+    
+    email: Optional[EmailStr] = Field(None, description="Email address (required if phone_number not provided)")
+    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number (required if email not provided)")
+    password: str = Field(..., description="Password")
+    
+    @model_validator(mode='after')
+    def check_email_or_phone(self):
+        """Validate that at least one of email or phone_number is provided"""
+        if not self.email and not self.phone_number:
+            raise ValueError('Either email or phone_number must be provided')
+        return self

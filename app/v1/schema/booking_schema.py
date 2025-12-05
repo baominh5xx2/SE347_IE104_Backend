@@ -106,3 +106,100 @@ class BookingDeleteResponse(BaseModel):
     """Response schema for booking deletion"""
     EC: int = Field(..., description="Error code (0 = success)")
     EM: str = Field(..., description="Error message")
+
+
+# ============================================
+# Schemas for UC-USER-03: Quản lý Tour Đã Đăng Ký
+# ============================================
+
+class TourPackageInfo(BaseModel):
+    """Schema for tour package information in booking response"""
+    package_id: UUID
+    package_name: str = Field(..., description="Tên tour package")
+    destination: str = Field(..., description="Điểm đến")
+    description: Optional[str] = Field(None, description="Mô tả tour")
+    duration_days: int = Field(..., description="Số ngày tour")
+    start_date: Optional[str] = Field(None, description="Ngày bắt đầu")
+    end_date: Optional[str] = Field(None, description="Ngày kết thúc")
+    price: float = Field(..., description="Giá tour")
+    image_urls: Optional[str] = Field(None, description="URLs hình ảnh (phân cách bằng |)")
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MyBookingListItem(BaseModel):
+    """Schema for booking item in user's booking list"""
+    booking_id: UUID
+    tour_name: str = Field(..., description="Tên tour")
+    destination: str = Field(..., description="Điểm đến")
+    start_date: Optional[str] = Field(None, description="Ngày bắt đầu tour")
+    end_date: Optional[str] = Field(None, description="Ngày kết thúc tour")
+    number_of_people: int = Field(..., description="Số lượng người")
+    total_amount: float = Field(..., description="Tổng số tiền")
+    status: str = Field(..., description="Trạng thái: pending/confirmed/cancelled/completed")
+    created_at: datetime = Field(..., description="Ngày tạo booking")
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MyBookingDetail(BaseModel):
+    """Schema for detailed booking information"""
+    booking_id: UUID
+    status: str = Field(..., description="Trạng thái booking")
+    number_of_people: int = Field(..., description="Số lượng người")
+    total_amount: float = Field(..., description="Tổng số tiền")
+    contact_name: str = Field(..., description="Tên người liên hệ")
+    contact_phone: str = Field(..., description="Số điện thoại liên hệ")
+    special_requests: Optional[str] = Field(None, description="Yêu cầu đặc biệt")
+    created_at: datetime = Field(..., description="Ngày tạo")
+    updated_at: datetime = Field(..., description="Ngày cập nhật")
+    tour_package: Optional[TourPackageInfo] = Field(None, description="Thông tin tour package")
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MyBookingListResponse(BaseModel):
+    """Response schema for user's booking list"""
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[list[MyBookingListItem]] = None
+    total: Optional[int] = None
+
+
+class MyBookingDetailResponse(BaseModel):
+    """Response schema for user's booking detail"""
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[MyBookingDetail] = None
+
+
+class AdminBookingListItem(BaseModel):
+    """Schema for booking item in admin's booking list (includes user info)"""
+    booking_id: UUID
+    user_id: UUID = Field(..., description="ID của user")
+    user_email: Optional[str] = Field(None, description="Email của user")
+    user_full_name: Optional[str] = Field(None, description="Tên đầy đủ của user")
+    tour_name: str = Field(..., description="Tên tour")
+    destination: str = Field(..., description="Điểm đến")
+    start_date: Optional[str] = Field(None, description="Ngày bắt đầu tour")
+    number_of_people: int = Field(..., description="Số lượng người")
+    total_amount: float = Field(..., description="Tổng số tiền")
+    status: str = Field(..., description="Trạng thái")
+    created_at: datetime = Field(..., description="Ngày tạo booking")
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminBookingListResponse(BaseModel):
+    """Response schema for admin's booking list"""
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[list[AdminBookingListItem]] = None
+    total: Optional[int] = None
+
+
+class AdminBookingDetailResponse(BaseModel):
+    """Response schema for admin's booking detail"""
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[MyBookingDetail] = None

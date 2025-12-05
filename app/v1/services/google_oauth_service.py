@@ -227,6 +227,7 @@ class GoogleOAuthService:
                     "is_activate": True,
                     "login_type": "GOOGLE",
                     "security_2fa_enabled": False,
+                    "role": "user",  # Default role for new users
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 }

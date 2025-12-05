@@ -10,14 +10,16 @@ import bcrypt
 import logging
 
 from app.v1.services.auth_service import AuthService
-from app.v1.api.endpoints.auth import register, login, verify_token
+from app.v1.api.endpoints.auth import register, login, verify_token, register_admin, login_admin
 from app.v1.schema.auth_schema import (
     RegisterRequest,
     LoginRequest,
     VerifyTokenRequest,
     RegisterResponse,
     LoginResponse,
-    VerifyTokenResponse
+    VerifyTokenResponse,
+    AdminRegisterRequest,
+    AdminLoginRequest
 )
 
 # Setup logging for tests
@@ -222,8 +224,8 @@ class TestAuthService:
             password="password123"
         )
         
-        assert result["EC"] == 1
-        assert result["EM"] == "Email/Password is incorrect"
+        assert result["EC"] == 2
+        assert result["EM"] == "Email/Phone/Password is incorrect"
         assert "access_token" not in result
         logger.info("✅ PASS: Email not found error handled correctly")
     
@@ -245,7 +247,7 @@ class TestAuthService:
         )
         
         assert result["EC"] == 2
-        assert result["EM"] == "Email/Password is incorrect"
+        assert result["EM"] == "Email/Phone/Password is incorrect"
         assert "access_token" not in result
         logger.info("✅ PASS: Wrong password error handled correctly")
     
@@ -268,8 +270,9 @@ class TestAuthService:
             password="password123"
         )
         
-        assert result["EC"] == 1
-        assert result["EM"] == "Email/Password is incorrect"
+        assert result["EC"] == 2
+        assert result["EM"] == "Email/Phone/Password is incorrect"
+        logger.info("✅ PASS: No password hash error handled correctly")
     
     @pytest.mark.asyncio
     async def test_login_user_account_deactivated(self, auth_service, test_user_data):
@@ -1099,6 +1102,527 @@ class TestGoogleOAuthIntegration:
         assert isinstance(sample_response["user"]["profile_picture"], str) or sample_response["user"]["profile_picture"] is None
         
         logger.info("✓ Test google_oauth_response_format passed")
+
+
+# ==================== Admin Authentication Tests ====================
+
+class TestAdminAuthService:
+    """Test cases for Admin Authentication Service methods"""
+    
+    @pytest.fixture
+    def test_admin_data(self):
+        """Sample admin user data for testing"""
+        return {
+            "user_id": "admin_user_123",
+            "full_name": "Admin User",
+            "email": "admin@example.com",
+            "password_hash": bcrypt.hashpw("admin123456".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
+            "phone_number": "0987654321",
+            "is_activate": True,
+            "login_type": "TRADITIONAL",
+            "role": "admin",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+    
+    @pytest.fixture
+    def test_regular_user_data(self):
+        """Sample regular user data (not admin)"""
+        return {
+            "user_id": "regular_user_123",
+            "full_name": "Regular User",
+            "email": "user@example.com",
+            "password_hash": bcrypt.hashpw("user123456".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
+            "phone_number": "0123456789",
+            "is_activate": True,
+            "login_type": "TRADITIONAL",
+            "role": "user",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+    
+    # ========== Register Admin Tests ==========
+    
+    @pytest.mark.asyncio
+    async def test_register_admin_success(self, auth_service, test_admin_data):
+        """Test successful admin registration"""
+        logger.info("🧪 TEST: Register Admin - Success Case")
+        service, mock_table = auth_service
+        
+        # Mock: No existing user
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        # Mock: Successful insert
+        mock_insert = Mock()
+        new_admin = test_admin_data.copy()
+        mock_insert.execute = Mock(return_value=Mock(data=[new_admin]))
+        mock_table.insert = Mock(return_value=mock_insert)
+        
+        # Mock config để không require secret key (patch đúng path vì code import từ ..core.config)
+        with patch('app.v1.core.config.settings') as mock_settings:
+            mock_settings.ADMIN_SECRET_KEY = ""
+            
+            result = await service.register_admin(
+                full_name="Admin User",
+                email="admin@example.com",
+                password="admin123456",
+                phone_number="0987654321",
+                admin_secret_key=None
+            )
+        
+        assert result["EC"] == 0
+        assert result["EM"] == "Admin registered successfully"
+        assert result["user"]["email"] == "admin@example.com"
+        assert result["user"]["role"] == "admin"
+        assert "user_id" in result["user"]
+        logger.info("✅ PASS: Admin registered successfully")
+    
+    @pytest.mark.asyncio
+    async def test_register_admin_with_valid_secret_key(self, auth_service, test_admin_data):
+        """Test admin registration with valid secret key"""
+        logger.info("🧪 TEST: Register Admin - Valid Secret Key")
+        service, mock_table = auth_service
+        
+        # Mock: No existing user
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        # Mock: Successful insert
+        mock_insert = Mock()
+        new_admin = test_admin_data.copy()
+        mock_insert.execute = Mock(return_value=Mock(data=[new_admin]))
+        mock_table.insert = Mock(return_value=mock_insert)
+        
+        # Mock config với secret key
+        with patch('app.v1.services.auth_service.settings') as mock_settings:
+            mock_settings.ADMIN_SECRET_KEY = "secret123"
+            
+            result = await service.register_admin(
+                full_name="Admin User",
+                email="admin@example.com",
+                password="admin123456",
+                admin_secret_key="secret123"
+            )
+        
+        assert result["EC"] == 0
+        assert result["EM"] == "Admin registered successfully"
+        logger.info("✅ PASS: Admin registered with valid secret key")
+    
+    @pytest.mark.asyncio
+    async def test_register_admin_invalid_secret_key(self, auth_service):
+        """Test admin registration with invalid secret key"""
+        logger.info("🧪 TEST: Register Admin - Invalid Secret Key")
+        service, mock_table = auth_service
+        
+        # Mock config với secret key (patch đúng path vì code import từ ..core.config)
+        with patch('app.v1.core.config.settings') as mock_settings:
+            mock_settings.ADMIN_SECRET_KEY = "secret123"
+            
+            result = await service.register_admin(
+                full_name="Admin User",
+                email="admin@example.com",
+                password="admin123456",
+                admin_secret_key="wrong_secret"
+            )
+        
+        assert result["EC"] == 1  # EC = 1 cho invalid secret key (đúng theo implementation)
+        assert result["EM"] == "Invalid admin secret key"
+        logger.info("✅ PASS: Invalid secret key rejected")
+    
+    @pytest.mark.asyncio
+    async def test_register_admin_email_already_exists(self, auth_service):
+        """Test admin registration with existing email"""
+        logger.info("🧪 TEST: Register Admin - Email Already Exists")
+        service, mock_table = auth_service
+        
+        # Mock: User already exists
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[{"email": "admin@example.com"}]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        with patch('app.v1.services.auth_service.settings') as mock_settings:
+            mock_settings.ADMIN_SECRET_KEY = ""
+            
+            result = await service.register_admin(
+                full_name="Admin User",
+                email="admin@example.com",
+                password="admin123456"
+            )
+        
+        assert result["EC"] == 2
+        assert result["EM"] == "Email already exists"
+        logger.info("✅ PASS: Email already exists error handled correctly")
+    
+    @pytest.mark.asyncio
+    async def test_register_admin_insert_fails(self, auth_service):
+        """Test admin registration when database insert fails"""
+        logger.info("🧪 TEST: Register Admin - Insert Fails")
+        service, mock_table = auth_service
+        
+        # Mock: No existing user
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        # Mock: Insert fails
+        mock_insert = Mock()
+        mock_insert.execute = Mock(return_value=Mock(data=[]))
+        mock_table.insert = Mock(return_value=mock_insert)
+        
+        with patch('app.v1.services.auth_service.settings') as mock_settings:
+            mock_settings.ADMIN_SECRET_KEY = ""
+            
+            result = await service.register_admin(
+                full_name="Admin User",
+                email="admin@example.com",
+                password="admin123456"
+            )
+        
+        assert result["EC"] == 3
+        assert result["EM"] == "Failed to create admin user"
+        logger.info("✅ PASS: Insert failure handled correctly")
+    
+    @pytest.mark.asyncio
+    async def test_register_admin_exception(self, auth_service):
+        """Test admin registration exception handling"""
+        logger.info("🧪 TEST: Register Admin - Exception Handling")
+        service, mock_table = auth_service
+        
+        # Mock: Exception during select
+        mock_table.select = Mock(side_effect=Exception("Database error"))
+        
+        with patch('app.v1.services.auth_service.settings') as mock_settings:
+            mock_settings.ADMIN_SECRET_KEY = ""
+            
+            result = await service.register_admin(
+                full_name="Admin User",
+                email="admin@example.com",
+                password="admin123456"
+            )
+        
+        assert result["EC"] == 4
+        assert "Admin registration error" in result["EM"]
+        logger.info("✅ PASS: Exception handled correctly")
+    
+    # ========== Login Admin Tests ==========
+    
+    @pytest.mark.asyncio
+    async def test_login_admin_success(self, auth_service, test_admin_data):
+        """Test successful admin login"""
+        logger.info("🧪 TEST: Login Admin - Success Case")
+        service, mock_table = auth_service
+        
+        # Mock: Admin user exists
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[test_admin_data]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        result = await service.login_admin(
+            email="admin@example.com",
+            password="admin123456"
+        )
+        
+        assert result["EC"] == 0
+        assert result["EM"] == "Admin login successful"
+        assert "access_token" in result
+        assert result["user"]["email"] == "admin@example.com"
+        assert result["user"]["role"] == "admin"
+        logger.info("✅ PASS: Admin login successful")
+    
+    @pytest.mark.asyncio
+    async def test_login_admin_wrong_password(self, auth_service, test_admin_data):
+        """Test admin login with wrong password"""
+        logger.info("🧪 TEST: Login Admin - Wrong Password")
+        service, mock_table = auth_service
+        
+        # Mock: Admin user exists
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[test_admin_data]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        result = await service.login_admin(
+            email="admin@example.com",
+            password="wrong_password"
+        )
+        
+        assert result["EC"] == 2
+        assert result["EM"] == "Email/Phone/Password is incorrect"
+        logger.info("✅ PASS: Wrong password rejected")
+    
+    @pytest.mark.asyncio
+    async def test_login_admin_not_admin_role(self, auth_service, test_regular_user_data):
+        """Test admin login with regular user (not admin)"""
+        logger.info("🧪 TEST: Login Admin - Not Admin Role")
+        service, mock_table = auth_service
+        
+        # Mock: Regular user exists (role = 'user')
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[test_regular_user_data]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        result = await service.login_admin(
+            email="user@example.com",
+            password="user123456"
+        )
+        
+        assert result["EC"] == 4
+        assert result["EM"] == "Access denied. Admin privileges required."
+        logger.info("✅ PASS: Non-admin user rejected")
+    
+    @pytest.mark.asyncio
+    async def test_login_admin_email_not_found(self, auth_service):
+        """Test admin login with non-existent email"""
+        logger.info("🧪 TEST: Login Admin - Email Not Found")
+        service, mock_table = auth_service
+        
+        # Mock: User not found
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        result = await service.login_admin(
+            email="nonexistent@example.com",
+            password="admin123456"
+        )
+        
+        assert result["EC"] == 2
+        assert result["EM"] == "Email/Phone/Password is incorrect"
+        logger.info("✅ PASS: Non-existent email rejected")
+    
+    @pytest.mark.asyncio
+    async def test_login_admin_account_deactivated(self, auth_service, test_admin_data):
+        """Test admin login with deactivated account"""
+        logger.info("🧪 TEST: Login Admin - Account Deactivated")
+        service, mock_table = auth_service
+        
+        # Mock: Admin user exists but deactivated
+        deactivated_admin = test_admin_data.copy()
+        deactivated_admin["is_activate"] = False
+        
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[deactivated_admin]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        result = await service.login_admin(
+            email="admin@example.com",
+            password="admin123456"
+        )
+        
+        assert result["EC"] == 3
+        assert result["EM"] == "Account is not activated"
+        logger.info("✅ PASS: Deactivated account rejected")
+    
+    @pytest.mark.asyncio
+    async def test_login_admin_exception(self, auth_service):
+        """Test admin login exception handling"""
+        logger.info("🧪 TEST: Login Admin - Exception Handling")
+        service, mock_table = auth_service
+        
+        # Mock: Exception during query
+        mock_table.select = Mock(side_effect=Exception("Database error"))
+        
+        result = await service.login_admin(
+            email="admin@example.com",
+            password="admin123456"
+        )
+        
+        assert result["EC"] == 5
+        assert "Admin login error" in result["EM"]
+        logger.info("✅ PASS: Exception handled correctly")
+
+
+class TestAdminAuthEndpoints:
+    """Test cases for Admin Authentication API Endpoints"""
+    
+    @pytest.mark.asyncio
+    async def test_register_admin_endpoint_success(self, mock_supabase_client):
+        """Test POST /admin/register endpoint - success"""
+        logger.info("🧪 TEST: Admin Register Endpoint - Success")
+        from app.v1.api.endpoints.auth import register_admin
+        from app.v1.services.auth_service import AuthService
+        
+        client, mock_table = mock_supabase_client
+        service = AuthService(client)
+        
+        # Mock: No existing user
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        # Mock: Successful insert
+        new_admin = {
+            "user_id": "admin_123",
+            "email": "admin@example.com",
+            "full_name": "Admin User",
+            "role": "admin"
+        }
+        mock_insert = Mock()
+        mock_insert.execute = Mock(return_value=Mock(data=[new_admin]))
+        mock_table.insert = Mock(return_value=mock_insert)
+        
+        request = AdminRegisterRequest(
+            full_name="Admin User",
+            email="admin@example.com",
+            password="admin123456",
+            phone_number="0987654321"
+        )
+        
+        with patch('app.v1.api.endpoints.auth.get_auth_service', return_value=service):
+            with patch('app.v1.services.auth_service.settings') as mock_settings:
+                mock_settings.ADMIN_SECRET_KEY = ""
+                result = await register_admin(request, service)
+        
+        assert result.EC == 0
+        assert result.EM == "Admin registered successfully"
+        logger.info("✅ PASS: Admin register endpoint success")
+    
+    @pytest.mark.asyncio
+    async def test_register_admin_endpoint_email_exists(self, mock_supabase_client):
+        """Test POST /admin/register endpoint - email exists"""
+        logger.info("🧪 TEST: Admin Register Endpoint - Email Exists")
+        from app.v1.api.endpoints.auth import register_admin
+        from app.v1.services.auth_service import AuthService
+        
+        client, mock_table = mock_supabase_client
+        service = AuthService(client)
+        
+        # Mock: User already exists
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[{"email": "admin@example.com"}]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        request = AdminRegisterRequest(
+            full_name="Admin User",
+            email="admin@example.com",
+            password="admin123456"
+        )
+        
+        with patch('app.v1.api.endpoints.auth.get_auth_service', return_value=service):
+            with patch('app.v1.services.auth_service.settings') as mock_settings:
+                mock_settings.ADMIN_SECRET_KEY = ""
+                result = await register_admin(request, service)
+        
+        assert result.EC == 2
+        assert result.EM == "Email already exists"
+        logger.info("✅ PASS: Admin register endpoint - email exists handled")
+    
+    @pytest.mark.asyncio
+    async def test_login_admin_endpoint_success(self, mock_supabase_client):
+        """Test POST /admin/login endpoint - success"""
+        logger.info("🧪 TEST: Admin Login Endpoint - Success")
+        from app.v1.api.endpoints.auth import login_admin
+        from app.v1.services.auth_service import AuthService
+        
+        client, mock_table = mock_supabase_client
+        service = AuthService(client)
+        
+        # Mock: Admin user exists
+        admin_data = {
+            "user_id": "admin_123",
+            "email": "admin@example.com",
+            "full_name": "Admin User",
+            "password_hash": bcrypt.hashpw("admin123456".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
+            "is_activate": True,
+            "role": "admin"
+        }
+        
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[admin_data]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        request = AdminLoginRequest(
+            email="admin@example.com",
+            password="admin123456"
+        )
+        
+        with patch('app.v1.api.endpoints.auth.get_auth_service', return_value=service):
+            result = await login_admin(request, service)
+        
+        assert result.EC == 0
+        assert result.EM == "Admin login successful"
+        assert result.access_token is not None
+        assert result.user["role"] == "admin"
+        logger.info("✅ PASS: Admin login endpoint success")
+    
+    @pytest.mark.asyncio
+    async def test_login_admin_endpoint_not_admin(self, mock_supabase_client):
+        """Test POST /admin/login endpoint - user is not admin"""
+        logger.info("🧪 TEST: Admin Login Endpoint - Not Admin")
+        from app.v1.api.endpoints.auth import login_admin
+        from app.v1.services.auth_service import AuthService
+        
+        client, mock_table = mock_supabase_client
+        service = AuthService(client)
+        
+        # Mock: Regular user exists (role = 'user')
+        user_data = {
+            "user_id": "user_123",
+            "email": "user@example.com",
+            "full_name": "Regular User",
+            "password_hash": bcrypt.hashpw("user123456".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
+            "is_activate": True,
+            "role": "user"
+        }
+        
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[user_data]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        request = AdminLoginRequest(
+            email="user@example.com",
+            password="user123456"
+        )
+        
+        with patch('app.v1.api.endpoints.auth.get_auth_service', return_value=service):
+            result = await login_admin(request, service)
+        
+        assert result.EC == 4
+        assert "Admin privileges required" in result.EM
+        logger.info("✅ PASS: Admin login endpoint - non-admin rejected")
+    
+    @pytest.mark.asyncio
+    async def test_login_admin_endpoint_wrong_credentials(self, mock_supabase_client):
+        """Test POST /admin/login endpoint - wrong credentials"""
+        logger.info("🧪 TEST: Admin Login Endpoint - Wrong Credentials")
+        from app.v1.api.endpoints.auth import login_admin
+        from app.v1.services.auth_service import AuthService
+        
+        client, mock_table = mock_supabase_client
+        service = AuthService(client)
+        
+        # Mock: User not found
+        mock_select = Mock()
+        mock_select.eq = Mock(return_value=mock_select)
+        mock_select.execute = Mock(return_value=Mock(data=[]))
+        mock_table.select = Mock(return_value=mock_select)
+        
+        request = AdminLoginRequest(
+            email="admin@example.com",
+            password="wrong_password"
+        )
+        
+        with patch('app.v1.api.endpoints.auth.get_auth_service', return_value=service):
+            result = await login_admin(request, service)
+        
+        assert result.EC == 2
+        assert "incorrect" in result.EM.lower()
+        logger.info("✅ PASS: Admin login endpoint - wrong credentials rejected")
 
 
 if __name__ == "__main__":

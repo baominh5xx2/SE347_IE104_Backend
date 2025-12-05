@@ -14,7 +14,9 @@ from ...schema.auth_schema import (
     VerifyTokenResponse,
     GoogleLoginRequest,
     GoogleCallbackRequest,
-    GoogleAuthURLResponse
+    GoogleAuthURLResponse,
+    AdminRegisterRequest,
+    AdminLoginRequest
 )
 from ...services.auth_service import AuthService
 from ...services.google_oauth_service import GoogleOAuthService
@@ -142,6 +144,69 @@ async def verify_token(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/admin/register", response_model=RegisterResponse)
+async def register_admin(
+    request: AdminRegisterRequest,
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Register a new admin user
+    
+    Requires admin_secret_key nếu ADMIN_SECRET_KEY được config trong .env
+    
+    Args:
+        request: Admin registration request data
+        auth_service: Authentication service instance
+        
+    Returns:
+        RegisterResponse with admin user data or error message
+    """
+    try:
+        result = await auth_service.register_admin(
+            full_name=request.full_name,
+            email=request.email,
+            password=request.password,
+            phone_number=request.phone_number,
+            admin_secret_key=request.admin_secret_key
+        )
+        
+        return RegisterResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error in admin register endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/login", response_model=LoginResponse)
+async def login_admin(
+    request: AdminLoginRequest,
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Authenticate admin user and return access token
+    Verify user có role = 'admin' sau khi login thành công
+    
+    Args:
+        request: Admin login request data (must provide either email or phone_number with password)
+        auth_service: Authentication service instance
+        
+    Returns:
+        LoginResponse with access token and admin user data or error message
+    """
+    try:
+        result = await auth_service.login_admin(
+            password=request.password,
+            email=request.email,
+            phone_number=request.phone_number
+        )
+        
+        return LoginResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error in admin login endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/")
 async def auth_info():
     """
@@ -157,6 +222,8 @@ async def auth_info():
             "register": "POST /api/v1/auth/register",
             "login": "POST /api/v1/auth/login",
             "verify-token": "POST /api/v1/auth/verify-token",
+            "admin-register": "POST /api/v1/auth/admin/register",
+            "admin-login": "POST /api/v1/auth/admin/login",
             "google-auth-url": "GET /api/v1/auth/google/auth-url",
             "google-login": "POST /api/v1/auth/google/login",
             "google-callback": "GET /api/v1/auth/google/callback"
