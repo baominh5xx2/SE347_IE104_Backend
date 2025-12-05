@@ -17,7 +17,7 @@ from ...schema.tour_package_schema import (
     TourPackageCreateResponse,
     TourPackageUpdateResponse,
     TourPackageDeleteResponse,
-    TourPackageBulkCreateResponse
+    TourPackageBulkCreateResponse,
     TourPackageSearchRequest,
     TourPackageRecommendRequest,
     TourPackageSearchResponse

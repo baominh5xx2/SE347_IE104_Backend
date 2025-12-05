@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/google/callback"
     
+    # Admin Configuration
+    ADMIN_SECRET_KEY: str = ""  # Secret key để tạo admin mới (optional, để trống nếu không cần)
+    
     # Redis Configuration
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379

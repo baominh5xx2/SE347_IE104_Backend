@@ -484,6 +484,8 @@ class TourPackageService:
                 "failed": len(packages_data),
                 "created_packages": [],
                 "errors": [str(e)]
+            }
+    
     async def search_packages(
         self,
         user_message: str,

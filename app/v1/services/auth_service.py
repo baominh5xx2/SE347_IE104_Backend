@@ -126,6 +126,7 @@ class AuthService:
                 "is_activate": True,
                 "login_type": "TRADITIONAL",
                 "security_2fa_enabled": False,
+                "role": "user",  # Default role for new users
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
@@ -285,4 +286,221 @@ class AuthService:
             return {
                 "EC": 3,
                 "EM": f"Token verification error: {str(e)}"
+            }
+    
+    def get_user_role(self, user_id: str) -> Optional[str]:
+        """
+        Get user role from database
+        
+        Args:
+            user_id: UUID of the user
+            
+        Returns:
+            User role ('user' or 'admin') or None if user doesn't exist
+        """
+        try:
+            result = self.supabase.table('users') \
+                .select('role') \
+                .eq('user_id', user_id) \
+                .execute()
+            
+            if not result.data:
+                logger.warning(f"User {user_id} not found")
+                return None
+            
+            role = result.data[0].get('role', 'user')
+            return role
+            
+        except Exception as e:
+            logger.error(f"Error getting user role for {user_id}: {str(e)}")
+            return None
+    
+    async def register_admin(
+        self,
+        full_name: str,
+        email: str,
+        password: str,
+        phone_number: Optional[str] = None,
+        admin_secret_key: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Register a new admin user
+        
+        Args:
+            full_name: Admin's full name
+            email: Admin's email address
+            password: Admin's password
+            phone_number: Optional phone number
+            admin_secret_key: Secret key để verify quyền tạo admin (optional, có thể check từ config)
+            
+        Returns:
+            Dict containing registration result
+        """
+        try:
+            # Check if admin secret key is required and valid
+            # Có thể check từ config hoặc environment variable
+            from ..core.config import settings
+            required_secret = getattr(settings, 'ADMIN_SECRET_KEY', None)
+            
+            if required_secret and admin_secret_key != required_secret:
+                return {
+                    "EC": 1,
+                    "EM": "Invalid admin secret key"
+                }
+            
+            # Check if user already exists
+            existing_user = self.supabase.table('users') \
+                .select("*") \
+                .eq('email', email) \
+                .execute()
+            
+            if existing_user.data:
+                return {
+                    "EC": 2,
+                    "EM": "Email already exists"
+                }
+            
+            # Hash password
+            hashed_password = self._hash_password(password)
+            
+            # Create admin user in database
+            user_data = {
+                "full_name": full_name,
+                "email": email,
+                "password_hash": hashed_password,
+                "phone_number": phone_number,
+                "is_activate": True,
+                "login_type": "TRADITIONAL",
+                "security_2fa_enabled": False,
+                "role": "admin",  # Set role as admin
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            result = self.supabase.table('users').insert(user_data).execute()
+            
+            if result.data:
+                user = result.data[0]
+                return {
+                    "EC": 0,
+                    "EM": "Admin registered successfully",
+                    "user": {
+                        "user_id": user["user_id"],
+                        "email": user["email"],
+                        "full_name": user["full_name"],
+                        "phone_number": user.get("phone_number"),
+                        "role": user.get("role", "admin")
+                    }
+                }
+            else:
+                return {
+                    "EC": 3,
+                    "EM": "Failed to create admin user"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error registering admin: {str(e)}")
+            return {
+                "EC": 4,
+                "EM": f"Admin registration error: {str(e)}"
+            }
+    
+    async def login_admin(
+        self,
+        password: str,
+        email: Optional[str] = None,
+        phone_number: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Authenticate admin user and generate access token
+        Verify user có role = 'admin' sau khi login thành công
+        
+        Args:
+            password: Admin's password
+            email: Admin's email address (optional)
+            phone_number: Admin's phone number (optional)
+            
+        Returns:
+            Dict containing login result with access token
+        """
+        try:
+            # Validate that at least one identifier is provided
+            if not email and not phone_number:
+                return {
+                    "EC": 1,
+                    "EM": "Either email or phone_number must be provided"
+                }
+            
+            # Fetch user by email or phone_number
+            query = self.supabase.table('users').select("*")
+            
+            if email:
+                query = query.eq('email', email)
+            else:
+                query = query.eq('phone_number', phone_number)
+            
+            result = query.execute()
+            
+            if not result.data:
+                return {
+                    "EC": 2,
+                    "EM": "Email/Phone/Password is incorrect"
+                }
+            
+            user = result.data[0]
+            
+            # Check if user has password (TRADITIONAL login)
+            if not user.get('password_hash'):
+                return {
+                    "EC": 2,
+                    "EM": "Email/Phone/Password is incorrect"
+                }
+            
+            # Verify password
+            if not self._verify_password(password, user['password_hash']):
+                return {
+                    "EC": 2,
+                    "EM": "Email/Phone/Password is incorrect"
+                }
+            
+            # Check if account is activated
+            if not user.get('is_activate', True):
+                return {
+                    "EC": 3,
+                    "EM": "Account is not activated"
+                }
+            
+            # Verify user is admin
+            role = user.get('role', 'user')
+            if role != 'admin':
+                return {
+                    "EC": 4,
+                    "EM": "Access denied. Admin privileges required."
+                }
+            
+            # Generate access token
+            access_token = self._generate_access_token({
+                "email": user["email"],
+                "full_name": user["full_name"],
+                "user_id": user["user_id"]
+            })
+            
+            return {
+                "EC": 0,
+                "EM": "Admin login successful",
+                "access_token": access_token,
+                "user": {
+                    "user_id": user["user_id"],
+                    "email": user["email"],
+                    "full_name": user["full_name"],
+                    "phone_number": user.get("phone_number"),
+                    "role": role
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error during admin login: {str(e)}")
+            return {
+                "EC": 5,
+                "EM": f"Admin login error: {str(e)}"
             }
