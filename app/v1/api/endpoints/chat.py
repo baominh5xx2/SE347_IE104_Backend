@@ -88,6 +88,7 @@ async def chat_stream(
                 pending_mcp_ui_html = None
                 pending_tour_packages = None
                 has_streamed_tokens = False
+                is_recommendation_response = False
                 
                 # Stream from LangGraph
                 async for event in supervisor_graph.process_message_stream(
@@ -148,7 +149,6 @@ async def chat_stream(
                             tour_packages_for_ui = chain_output.get("tour_packages", [])
                             
                             # Only send tour packages if this is a recommendation response (check URI)
-                            is_recommendation_response = False
                             if mcp_ui_resource and isinstance(mcp_ui_resource, dict):
                                 uri = str(mcp_ui_resource.get('uri', ''))
                                 if 'tour-recommendations' in uri:
@@ -193,8 +193,8 @@ async def chat_stream(
                     logger.info(f"📤 Streaming MCP UI event (no tokens, sending at end): {len(pending_tour_packages) if pending_tour_packages else 0} tour packages")
                     yield f"data: {json.dumps(ui_event, ensure_ascii=False)}\n\n"
                 
-                # Send recommendations (full tour packages) if available
-                if recommendations or tour_packages:
+                # Send recommendations (full tour packages) ONLY if this is a recommendation response
+                if is_recommendation_response and (recommendations or tour_packages):
                     # Use tour_packages if available (has full details), otherwise use IDs
                     rec_data = tour_packages if tour_packages else recommendations
                     rec_event = {
