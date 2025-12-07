@@ -13,6 +13,7 @@ class SearchTourPackagesInput(BaseModel):
 class CreateBookingInput(BaseModel):
     """Input schema for create_booking tool"""
     user_phone: str = Field(description="User phone number")
+    user_email: str = Field(description="User email address - REQUIRED for OTP verification")
     package_id: str = Field(description="Tour package ID from recommendation results")
     number_of_people: int = Field(description="Number of people traveling")
     special_requests: str = Field(default="", description="Special requests or requirements")

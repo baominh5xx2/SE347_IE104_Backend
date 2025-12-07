@@ -144,7 +144,8 @@ class BookingToolHandler:
     
     def create_booking(
         self, 
-        user_phone: str, 
+        user_phone: str,
+        user_email: str,
         package_id: str, 
         number_of_people: int, 
         special_requests: str = "", 
@@ -154,6 +155,7 @@ class BookingToolHandler:
         try:
             params = {
                 "user_phone": user_phone,
+                "user_email": user_email,
                 "package_id": package_id,
                 "number_of_people": number_of_people
             }
@@ -435,7 +437,7 @@ class MCPToolFactory:
         return StructuredTool.from_function(
             func=self.booking_handler.create_booking,
             name="create_booking",
-            description="Tạo booking mới cho user - YÊU CẦU THU THẬP ĐẦY ĐỦ THÔNG TIN TRƯỚC KHI GỌI (user_phone, package_id, number_of_people)",
+            description="Tạo booking mới cho user - YÊU CẦU THU THẬP ĐẦY ĐỦ THÔNG TIN TRƯỚC KHI GỌI (user_phone, user_email, package_id, number_of_people). Hệ thống sẽ gửi mã OTP về email để xác nhận.",
             args_schema=CreateBookingInput
         )
     

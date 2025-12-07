@@ -196,7 +196,7 @@ class BookingService:
                 "contact_phone": booking_data['contact_phone'],
                 "special_requests": booking_data.get('special_requests'),
                 "user_id": str(booking_data['user_id']),
-                "status": "pending",
+                "status": booking_data.get("status", "pending"),  # Allow custom status
                 "created_at": now,
                 "updated_at": now
             }

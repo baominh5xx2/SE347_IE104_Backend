@@ -9,6 +9,7 @@ from typing import Optional
 class CreateBookingInput(BaseModel):
     """Input schema for create_booking tool"""
     user_phone: str = Field(..., description="User phone number (Vietnamese format, e.g., '0901234567')")
+    user_email: str = Field(..., description="User email to send OTP")
     package_id: str = Field(..., description="Tour package UUID (must be exactly as returned from search_tour_packages)")
     number_of_people: int = Field(..., ge=1, le=50, description="Number of people (1-50)")
     special_requests: Optional[str] = Field(default="", description="Special requests or dietary restrictions")
@@ -31,3 +32,9 @@ class DeleteBookingInput(BaseModel):
 class GetUserBookingsInput(BaseModel):
     """Input schema for get_user_bookings tool"""
     user_id: str = Field(..., description="User ID was retrieved from the agent state. Do not ask user anymore.")
+
+
+class VerifyOTPInput(BaseModel):
+    """Input schema for verify_otp_and_confirm_booking tool"""
+    booking_id: str = Field(..., description="Booking ID waiting for OTP")
+    otp_code: str = Field(..., pattern="^[0-9]{6}$", description="6-digit OTP code")

@@ -182,45 +182,65 @@ class ChatAgentNodes:
                             # If package_id is a small number (e.g. "1", "2") or "tour 1", map it to real ID
                             if package_id and tour_packages:
                                 try:
-                                    # 1. Try index-based mapping (e.g. "1", "tour 1")
-                                    clean_id = str(package_id).lower().replace("tour", "").replace("số", "").strip()
-                                    if clean_id.isdigit():
-                                        idx = int(clean_id) - 1 # 1-based index to 0-based
-                                        if 0 <= idx < len(tour_packages):
-                                            real_package_id = tour_packages[idx].get("package_id")
-                                            if real_package_id:
-                                                logger.info(f"🔄 Smart Resolution: Mapped index '{package_id}' -> '{real_package_id}'")
-                                                tool_args["package_id"] = real_package_id
-                                                package_id = real_package_id # Update local var
+                                    import re
+                                    package_id_str = str(package_id)
                                     
-                                    # 2. Try fallback for hallucinated IDs (e.g. "pkg_tour_1", "package_1")
-                                    # If it's NOT a valid UUID and we have packages, default to the first package or try to match
-                                    elif len(str(package_id)) < 30: # UUIDs are 36 chars
-                                        logger.warning(f"⚠️ Detect potential hallucinated ID: '{package_id}'")
+                                    # Check if it's a valid UUID format (8-4-4-4-12 hex digits)
+                                    uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+                                    is_valid_uuid = bool(uuid_pattern.match(package_id_str))
+                                    
+                                    # If NOT a valid UUID, try to resolve it
+                                    if not is_valid_uuid:
+                                        logger.warning(f"⚠️ Invalid UUID format detected: '{package_id}' - attempting resolution")
                                         
-                                        # Simple heuristic: if user says "tour 1" or similar, we handled it above.
-                                        # If LLM hallucinated "pkg_tour_1" likely it means the first tour presented.
-                                        if "1" in str(package_id) and len(tour_packages) >= 1:
+                                        # 1. Try index-based mapping (e.g. "1", "tour 1")
+                                        clean_id = package_id_str.lower().replace("tour", "").replace("số", "").replace("pkg", "").replace("package", "").strip()
+                                        # Extract any digits from the string
+                                        digits = re.findall(r'\d+', clean_id)
+                                        
+                                        if digits:
+                                            idx = int(digits[0]) - 1  # 1-based index to 0-based
+                                            if 0 <= idx < len(tour_packages):
+                                                real_package_id = tour_packages[idx].get("package_id")
+                                                if real_package_id:
+                                                    logger.info(f"🔄 Smart Resolution: Mapped '{package_id}' -> '{real_package_id}' (Index {idx + 1})")
+                                                    tool_args["package_id"] = real_package_id
+                                                    package_id = real_package_id
+                                                    is_valid_uuid = True  # Mark as resolved
+                                        
+                                        # 2. If still not resolved, try to match by name (partial match)
+                                        if not is_valid_uuid:
+                                            package_id_lower = package_id_str.lower()
+                                            for idx, pkg in enumerate(tour_packages):
+                                                pkg_name = str(pkg.get("package_name", "")).lower()
+                                                pkg_dest = str(pkg.get("destination", "")).lower()
+                                                # Check if package_id contains destination or package name keywords
+                                                if pkg_dest in package_id_lower or any(word in package_id_lower for word in pkg_name.split() if len(word) > 3):
+                                                    real_package_id = pkg.get("package_id")
+                                                    if real_package_id:
+                                                        logger.info(f"🔄 Smart Resolution: Mapped '{package_id}' -> '{real_package_id}' (Matched by name: {pkg.get('package_name')})")
+                                                        tool_args["package_id"] = real_package_id
+                                                        package_id = real_package_id
+                                                        is_valid_uuid = True
+                                                        break
+                                        
+                                        # 3. Ultimate fallback: Use the first package if available
+                                        if not is_valid_uuid and tour_packages:
                                             real_package_id = tour_packages[0].get("package_id")
-                                            logger.info(f"🔄 Smart Resolution: Mapped hallucinated '{package_id}' -> '{real_package_id}' (First package)")
-                                            tool_args["package_id"] = real_package_id
-                                            package_id = real_package_id
-                                        elif "2" in str(package_id) and len(tour_packages) >= 2:
-                                            real_package_id = tour_packages[1].get("package_id")
-                                            logger.info(f"🔄 Smart Resolution: Mapped hallucinated '{package_id}' -> '{real_package_id}' (Second package)")
-                                            tool_args["package_id"] = real_package_id
-                                            package_id = real_package_id
-                                        else:
-                                            # Ultimate fallback: Use the first package if available
-                                            # This is better than crashing with invalid UUID
-                                            if tour_packages:
-                                                real_package_id = tour_packages[0].get("package_id")
-                                                logger.info(f"🔄 Smart Resolution: Fallback mapped '{package_id}' -> '{real_package_id}' (First available)")
+                                            if real_package_id:
+                                                logger.warning(f"⚠️ Fallback: Mapped invalid '{package_id}' -> '{real_package_id}' (First available package)")
                                                 tool_args["package_id"] = real_package_id
                                                 package_id = real_package_id
                                                 
                                 except Exception as map_err:
-                                    logger.warning(f"⚠️ Failed to map package_id '{package_id}': {map_err}")
+                                    logger.error(f"⚠️ Failed to map package_id '{package_id}': {map_err}")
+                                    # Last resort: use first package if available
+                                    if tour_packages:
+                                        real_package_id = tour_packages[0].get("package_id")
+                                        if real_package_id:
+                                            logger.warning(f"⚠️ Emergency fallback: Using first package '{real_package_id}'")
+                                            tool_args["package_id"] = real_package_id
+                                            package_id = real_package_id
 
                             # Just log warning if no recommendations, but allow booking to proceed
                             # MCP server will validate the package_id anyway
