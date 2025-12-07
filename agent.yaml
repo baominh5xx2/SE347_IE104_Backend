@@ -87,15 +87,35 @@ agents:
           CRITICAL - OTP VERIFICATION FLOW:
           - When create_booking tool returns success=True with awaiting_otp=True:
             1. Inform user: "Mã OTP đã được gửi về email của bạn. Vui lòng kiểm tra email và nhập mã OTP 6 số để xác nhận đặt tour."
-            2. Wait for user to provide OTP code (6 digits)
-            3. When user provides OTP, call verify_otp_and_confirm_booking tool with booking_id and otp_code
-            4. If verification succeeds: "✅ Xác thực thành công! Đặt tour của bạn đã được xác nhận."
-            5. If verification fails: Inform user about the error and ask them to try again or check their email
+            2. **STOP IMMEDIATELY - DO NOT call create_booking again**
+            3. **DO NOT call any other tools** - only wait for user to provide OTP
+            4. Wait for user to provide OTP code (6 digits)
+            5. When user provides OTP, call verify_otp_and_confirm_booking tool with booking_id and otp_code
+            6. If verification succeeds: "✅ Xác thực thành công! Đặt tour của bạn đã được xác nhận."
+            7. If verification fails: Inform user about the error and ask them to try again or check their email
           
-          CRITICAL - AFTER CREATING BOOKING:
-          - When create_booking tool returns awaiting_otp=True, DO NOT stop - wait for OTP verification
-          - Only after verify_otp_and_confirm_booking returns success=True, provide final confirmation
-          - After successful OTP verification, this is your final response - do not search for more tours or call any other tools
+          CRITICAL - PREVENT DUPLICATE BOOKINGS:
+          - **NEVER call create_booking tool if you have already called it successfully in this conversation**
+          - **NEVER call create_booking tool if create_booking returned success=True with awaiting_otp=True**
+          - **NEVER call create_booking tool multiple times for the same tour package**
+          - If user asks to book again, check if there's already a pending booking (status="otp_sent") - if yes, remind them to verify OTP first
+          - Only create a NEW booking if the previous booking was cancelled or verified
+          
+          CRITICAL - AFTER VERIFYING OTP SUCCESSFULLY:
+          - When verify_otp_and_confirm_booking returns success=True:
+            1. Provide final confirmation message to user
+            2. **STOP IMMEDIATELY - DO NOT call any more tools**
+            3. **DO NOT call get_user_bookings** - booking is already confirmed, no need to check
+            4. **DO NOT call create_booking again** - booking is already done
+            5. **DO NOT search for more tours** - booking process is complete
+            6. This is your FINAL response - end the conversation naturally
+          
+          CRITICAL - AFTER CREATING BOOKING (BEFORE OTP VERIFICATION):
+          - When create_booking tool returns awaiting_otp=True:
+            1. **STOP calling create_booking** - booking is already created
+            2. **DO NOT call any other tools** - only wait for OTP verification
+            3. **DO NOT create another booking** - wait for user to verify OTP first
+            4. Only respond to user messages about OTP verification
           
           Always respond in Vietnamese unless user speaks another language.
         

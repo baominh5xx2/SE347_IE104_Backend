@@ -23,7 +23,8 @@ from app.v1.schema.shema_tool_mcp import (
 from app.v1.mcp.src.schema import (
     GetUserBookingsInput,
     UpdateBookingInput,
-    DeleteBookingInput
+    DeleteBookingInput,
+    VerifyOTPInput
 )
 
 logger = logging.getLogger(__name__)
@@ -243,6 +244,27 @@ class BookingToolHandler:
         except Exception as e:
             logger.error(f"Error in delete_booking: {e}")
             return {"success": False, "error": f"Failed to delete booking: {str(e)}"}
+        
+        if result is None:
+            return {"success": False, "error": "No response from MCP server"}
+        
+        return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
+    
+    def verify_otp_and_confirm_booking(self, booking_id: str, otp_code: str) -> Dict[str, Any]:
+        """Verify OTP code and confirm booking"""
+        try:
+            params = {
+                "booking_id": booking_id,
+                "otp_code": otp_code
+            }
+            
+            result = self.mcp_client.call_tool_sync("verify_otp_and_confirm_booking", params)
+        except concurrent.futures.TimeoutError:
+            logger.error("verify_otp_and_confirm_booking timeout")
+            return {"success": False, "error": "Request timeout"}
+        except Exception as e:
+            logger.error(f"Error in verify_otp_and_confirm_booking: {e}")
+            return {"success": False, "error": f"Failed to verify OTP: {str(e)}"}
         
         if result is None:
             return {"success": False, "error": "No response from MCP server"}
@@ -468,6 +490,15 @@ class MCPToolFactory:
             args_schema=DeleteBookingInput
         )
     
+    def verify_otp_and_confirm_booking_tool(self) -> StructuredTool:
+        """Create StructuredTool for verify_otp_and_confirm_booking"""
+        return StructuredTool.from_function(
+            func=self.booking_handler.verify_otp_and_confirm_booking,
+            name="verify_otp_and_confirm_booking",
+            description="Xác thực mã OTP và xác nhận booking. Gọi tool này khi user cung cấp mã OTP 6 số từ email. Sau khi verify thành công, booking sẽ được chuyển sang trạng thái 'confirmed'.",
+            args_schema=VerifyOTPInput
+        )
+    
     # Search Tools
     def search_tour_packages_tool(self) -> StructuredTool:
         """Create StructuredTool for search_tour_packages"""
@@ -593,6 +624,9 @@ def update_booking_tool() -> StructuredTool:
 
 def delete_booking_tool() -> StructuredTool:
     return _tool_factory.delete_booking_tool()
+
+def verify_otp_and_confirm_booking_tool() -> StructuredTool:
+    return _tool_factory.verify_otp_and_confirm_booking_tool()
 
 def search_tour_packages_tool() -> StructuredTool:
     return _tool_factory.search_tour_packages_tool()

@@ -405,7 +405,18 @@ def register_booking_tools(mcp: FastMCP):
         try:
             supabase = get_supabase_client()
             
-            # 1. Get OTP record
+            # 1. Get OTP record - First check if booking exists
+            booking_check = supabase.table("otp_verifications")\
+                .select("*")\
+                .eq("booking_id", booking_id)\
+                .execute()
+            
+            if not booking_check.data:
+                return {"success": False, "error": "Không tìm thấy mã OTP cho booking này"}
+            
+            # 2. Get OTP record with correct code and not verified
+            # NOTE: Do NOT filter by expires_at in query - check expiry in code after getting record
+            # This allows us to distinguish between wrong code vs expired
             otp_res = supabase.table("otp_verifications")\
                 .select("*")\
                 .eq("booking_id", booking_id)\
@@ -414,34 +425,94 @@ def register_booking_tools(mcp: FastMCP):
                 .execute()
             
             if not otp_res.data:
-                # Increment attempts
+                # OTP code is wrong - increment attempts
                 existing_otp = supabase.table("otp_verifications")\
-                    .select("attempts")\
+                    .select("attempts, otp_code, expires_at, created_at")\
                     .eq("booking_id", booking_id)\
                     .execute()
                 
                 if existing_otp.data:
-                    current_attempts = existing_otp.data[0].get("attempts", 0)
+                    otp_info = existing_otp.data[0]
+                    current_attempts = otp_info.get("attempts", 0)
+                    stored_otp = otp_info.get("otp_code", "")
+                    
+                    # Increment attempts
                     supabase.table("otp_verifications")\
                         .update({"attempts": current_attempts + 1})\
                         .eq("booking_id", booking_id)\
                         .execute()
+                    
+                    # Check if it's wrong code vs expired
+                    expires_at_str = otp_info.get('expires_at')
+                    if expires_at_str:
+                        from datetime import timezone
+                        if isinstance(expires_at_str, str):
+                            if expires_at_str.endswith('Z'):
+                                expires_at_str = expires_at_str.replace('Z', '+00:00')
+                            expires_at = datetime.fromisoformat(expires_at_str)
+                        else:
+                            expires_at = expires_at_str
+                        
+                        if expires_at.tzinfo is None:
+                            expires_at = expires_at.replace(tzinfo=timezone.utc)
+                        else:
+                            expires_at = expires_at.astimezone(timezone.utc)
+                        
+                        now_utc = datetime.now(timezone.utc)
+                        if now_utc > expires_at:
+                            logger.warning(f"OTP expired: expires_at={expires_at}, now={now_utc}")
+                            return {"success": False, "error": "Mã OTP đã hết hạn"}
+                    
+                    logger.warning(f"Wrong OTP code: provided={otp_code}, stored={stored_otp}")
+                    return {"success": False, "error": "Mã OTP không đúng"}
                 
-                return {"success": False, "error": "Mã OTP không đúng hoặc đã hết hạn"}
+                return {"success": False, "error": "Mã OTP không đúng"}
             
             otp_record = otp_res.data[0]
             
-            # 2. Check expiry
+            # 3. Check expiry - Fix timezone comparison issue
             expires_at_str = otp_record['expires_at']
+            created_at_str = otp_record.get('created_at')
+            
+            from datetime import timezone
+            
+            # Parse expires_at and ensure UTC timezone
             if isinstance(expires_at_str, str):
+                # Handle different datetime formats from database
                 if expires_at_str.endswith('Z'):
                     expires_at_str = expires_at_str.replace('Z', '+00:00')
                 expires_at = datetime.fromisoformat(expires_at_str)
             else:
                 expires_at = expires_at_str
             
-            if datetime.now(expires_at.tzinfo if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo else None) > expires_at:
+            # Ensure expires_at is timezone-aware (assume UTC if not)
+            if expires_at.tzinfo is None:
+                # If no timezone, assume UTC (database TIMESTAMP without timezone defaults to UTC in Supabase)
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            else:
+                # Convert to UTC for consistent comparison
+                expires_at = expires_at.astimezone(timezone.utc)
+            
+            # Get current time in UTC
+            now_utc = datetime.now(timezone.utc)
+            
+            # Log for debugging - show raw values and parsed values
+            logger.info(f"🔍 OTP expiry check for booking {booking_id}:")
+            logger.info(f"   Raw expires_at from DB: {expires_at_str}")
+            logger.info(f"   Parsed expires_at (UTC): {expires_at}")
+            logger.info(f"   Current time (UTC): {now_utc}")
+            logger.info(f"   Created_at: {created_at_str}")
+            
+            remaining_seconds = (expires_at - now_utc).total_seconds()
+            logger.info(f"   ⏱️ Time remaining: {remaining_seconds:.2f} seconds ({remaining_seconds/60:.2f} minutes)")
+            
+            # Compare in UTC - only expire if current time is AFTER expires_at
+            if now_utc > expires_at:
+                time_diff = (now_utc - expires_at).total_seconds()
+                logger.error(f"❌ OTP EXPIRED: expires_at={expires_at}, now={now_utc}, expired by {time_diff:.2f} seconds")
                 return {"success": False, "error": "Mã OTP đã hết hạn"}
+            
+            logger.info(f"✅ OTP is still valid - {remaining_seconds:.2f} seconds remaining")
             
             # 3. Check attempts (max 3)
             if otp_record.get('attempts', 0) >= 3:
