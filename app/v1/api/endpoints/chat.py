@@ -4,12 +4,14 @@ Chat API Endpoints
 import logging
 import uuid
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from typing import Optional
 from ...schema.agent_schema import ChatRequest, ChatResponse, ConversationHistory
 from ...services.agent_services import supervisor_graph
 from ...services.agent_services.memory import conversation_memory
+from ...core.dependencies import get_current_user, get_chat_room_service
+from ...services.chat_room_service import ChatRoomService
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -18,14 +20,52 @@ router = APIRouter()
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(
+    request: ChatRequest,
+    current_user: dict = Depends(get_current_user),
+    chat_room_service: ChatRoomService = Depends(get_chat_room_service)
+):
     """
     Send a chat message and get AI response via streaming
+    Tự động tạo room nếu chưa có và lưu messages vào database
     """
     try:
-        # Generate conversation_id if not provided
-        conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
-        user_id = request.user_id or "df40e279-3389-4d4b-8d94-6ef74d9545b4"
+        user_id = str(current_user["user_id"])
+        
+        # Nếu có conversation_id, dùng làm room_id
+        # Nếu không có, tạo room mới
+        room_id = None
+        if request.conversation_id:
+            # Check room exists
+            room_result = chat_room_service.get_room_by_id(request.conversation_id, user_id)
+            if room_result["EC"] == 0:
+                room_id = request.conversation_id
+            else:
+                # Room không tồn tại hoặc không thuộc user, tạo mới
+                room_result = chat_room_service.create_room(user_id)
+                if room_result["EC"] == 0:
+                    room_id = str(room_result["data"]["room_id"])
+        else:
+            # Tạo room mới
+            room_result = chat_room_service.create_room(user_id)
+            if room_result["EC"] == 0:
+                room_id = str(room_result["data"]["room_id"])
+        
+        if not room_id:
+            raise HTTPException(status_code=500, detail="Failed to create or get chat room")
+        
+        conversation_id = room_id  # Use room_id as conversation_id
+        
+        # Lưu user message vào database
+        try:
+            chat_room_service.save_message(
+                room_id=room_id,
+                user_id=user_id,
+                role="user",
+                content=request.message
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save user message: {str(e)}")
         
         async def event_generator():
             try:
@@ -174,6 +214,33 @@ async def chat_stream(request: ChatRequest):
                 # Send done
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 
+                # Lưu assistant response vào database
+                try:
+                    chat_room_service.save_message(
+                        room_id=room_id,
+                        user_id=user_id,
+                        role="assistant",
+                        content=full_response,
+                        intent=metadata.get("intent") if metadata else None,
+                        entities=metadata.get("entities") if metadata else None
+                    )
+                    
+                    # Update room title từ message đầu tiên nếu chưa có title tùy chỉnh
+                    if full_response:
+                        # Check if this is first message in room
+                        msg_count_result = chat_room_service.supabase.table('chat_history')\
+                            .select("*", count="exact")\
+                            .eq('room_id', room_id)\
+                            .execute()
+                        msg_count = msg_count_result.count if hasattr(msg_count_result, 'count') else 0
+                        
+                        # Nếu chỉ có 2 messages (user + assistant), update title
+                        if msg_count == 2:
+                            title = chat_room_service.auto_generate_title(request.message)
+                            chat_room_service.update_room(room_id, user_id, title=title)
+                except Exception as e:
+                    logger.warning(f"Failed to save assistant message: {str(e)}")
+                
                 # Store episode in memory (without large tour_packages data to avoid metadata limit)
                 try:
                     # Only store lightweight metadata to avoid Mem0 2000 char limit
@@ -214,20 +281,59 @@ async def chat_stream(request: ChatRequest):
 
 
 @router.post("/", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    current_user: dict = Depends(get_current_user),
+    chat_room_service: ChatRoomService = Depends(get_chat_room_service)
+):
     """
     Send a chat message and get AI response
     
     Args:
         request: Chat request with message and optional conversation_id
+        current_user: Current authenticated user
+        chat_room_service: ChatRoomService instance
         
     Returns:
         ChatResponse with assistant's response
     """
     try:
-        # Generate conversation_id if not provided
-        conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:12]}"
-        user_id = request.user_id or "df40e279-3389-4d4b-8d94-6ef74d9545b4"
+        user_id = str(current_user["user_id"])
+        
+        # Nếu có conversation_id, dùng làm room_id
+        # Nếu không có, tạo room mới
+        room_id = None
+        if request.conversation_id:
+            # Check room exists
+            room_result = chat_room_service.get_room_by_id(request.conversation_id, user_id)
+            if room_result["EC"] == 0:
+                room_id = request.conversation_id
+            else:
+                # Room không tồn tại hoặc không thuộc user, tạo mới
+                room_result = chat_room_service.create_room(user_id)
+                if room_result["EC"] == 0:
+                    room_id = str(room_result["data"]["room_id"])
+        else:
+            # Tạo room mới
+            room_result = chat_room_service.create_room(user_id)
+            if room_result["EC"] == 0:
+                room_id = str(room_result["data"]["room_id"])
+        
+        if not room_id:
+            raise HTTPException(status_code=500, detail="Failed to create or get chat room")
+        
+        conversation_id = room_id  # Use room_id as conversation_id
+        
+        # Lưu user message vào database
+        try:
+            chat_room_service.save_message(
+                room_id=room_id,
+                user_id=user_id,
+                role="user",
+                content=request.message
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save user message: {str(e)}")
         
         # Process message through supervisor graph
         result = await supervisor_graph.process_message(
@@ -238,6 +344,33 @@ async def chat(request: ChatRequest):
         
         # Extract response
         response_message = result.get("response", "Xin lỗi, không thể xử lý yêu cầu của bạn.")
+        
+        # Lưu assistant response vào database
+        try:
+            metadata = result.get("metadata", {})
+            chat_room_service.save_message(
+                room_id=room_id,
+                user_id=user_id,
+                role="assistant",
+                content=response_message,
+                intent=metadata.get("intent") if metadata else None,
+                entities=metadata.get("entities") if metadata else None
+            )
+            
+            # Update room title từ message đầu tiên nếu chưa có title tùy chỉnh
+            # Check if this is first message in room
+            msg_count_result = chat_room_service.supabase.table('chat_history')\
+                .select("*", count="exact")\
+                .eq('room_id', room_id)\
+                .execute()
+            msg_count = msg_count_result.count if hasattr(msg_count_result, 'count') else 0
+            
+            # Nếu chỉ có 2 messages (user + assistant), update title
+            if msg_count == 2:
+                title = chat_room_service.auto_generate_title(request.message)
+                chat_room_service.update_room(room_id, user_id, title=title)
+        except Exception as e:
+            logger.warning(f"Failed to save assistant message: {str(e)}")
         
         # Store episode in memory if available
         try:

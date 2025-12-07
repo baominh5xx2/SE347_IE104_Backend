@@ -120,3 +120,14 @@ def get_current_admin(
     
     return current_user
 
+
+def get_chat_room_service():
+    """
+    Dependency để get ChatRoomService instance
+    
+    Returns:
+        ChatRoomService instance
+    """
+    from ..services.chat_room_service import ChatRoomService
+    supabase = get_supabase_client()
+    return ChatRoomService(supabase)
