@@ -174,17 +174,68 @@ Nếu bạn không yêu cầu mã này, vui lòng bỏ qua email này.
             content = Content("text/html", html_content)
             mail = Mail(from_email, to_email, subject, content)
             
+            logger.info(f"Attempting to send OTP email to {email} from {settings.SENDGRID_FROM_EMAIL}")
             response = self.sendgrid_client.send(mail)
+            
+            # Log response details
+            logger.info(f"SendGrid response status code: {response.status_code}")
+            if hasattr(response, 'headers'):
+                logger.info(f"SendGrid response headers: {dict(response.headers)}")
+            if hasattr(response, 'body'):
+                logger.info(f"SendGrid response body: {response.body}")
             
             if response.status_code in [200, 202]:
                 logger.info(f"OTP email sent successfully to {email}")
                 return True
             else:
-                logger.error(f"Failed to send OTP email. Status: {response.status_code}, Body: {response.body}")
+                # Log detailed error for debugging
+                error_body = ""
+                if hasattr(response, 'body'):
+                    error_body = str(response.body)
+                logger.error(f"Failed to send OTP email. Status: {response.status_code}, Body: {error_body}")
+                logger.error(f"SendGrid API Key configured: {bool(settings.SENDGRID_API_KEY)}, From Email: {settings.SENDGRID_FROM_EMAIL}")
+                # Also print to console for test visibility
+                print(f"\n❌ SendGrid Error:")
+                print(f"   Status Code: {response.status_code}")
+                print(f"   Response Body: {error_body}")
                 return False
                 
         except Exception as e:
             logger.error(f"Error sending OTP email: {str(e)}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            # Check if it's an HTTP error and log details
+            if hasattr(e, 'status_code'):
+                logger.error(f"HTTP Status: {e.status_code}")
+                # Print to console for test visibility
+                print(f"\n❌ SendGrid HTTP Error:")
+                print(f"   Status Code: {e.status_code}")
+                
+                if e.status_code == 403:
+                    print(f"\n⚠️  IMPORTANT: SendGrid 403 Forbidden Error")
+                    print(f"   This usually means the FROM email address is not verified.")
+                    print(f"   FROM Email: {settings.SENDGRID_FROM_EMAIL}")
+                    print(f"\n   To fix this:")
+                    print(f"   1. Go to SendGrid Dashboard: https://app.sendgrid.com/")
+                    print(f"   2. Navigate to: Settings > Sender Authentication")
+                    print(f"   3. Verify Single Sender or Domain for: {settings.SENDGRID_FROM_EMAIL}")
+                    print(f"   4. Complete the verification process (check email inbox)")
+                    print(f"   5. Wait a few minutes for verification to complete")
+                    
+            if hasattr(e, 'body'):
+                error_body = e.body
+                logger.error(f"Error Body: {error_body}")
+                # Try to parse JSON error message
+                try:
+                    import json
+                    if isinstance(error_body, bytes):
+                        error_body = error_body.decode('utf-8')
+                    error_json = json.loads(error_body)
+                    if 'errors' in error_json:
+                        for err in error_json['errors']:
+                            print(f"\n   Error Message: {err.get('message', 'Unknown error')}")
+                            print(f"   Field: {err.get('field', 'Unknown')}")
+                except:
+                    print(f"   Error Body: {error_body}")
             return False
     
     def store_pending_booking(self, email: str, booking_data: Dict[str, Any]) -> bool:

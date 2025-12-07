@@ -23,7 +23,8 @@ from app.v1.schema.shema_tool_mcp import (
 from app.v1.mcp.src.schema import (
     GetUserBookingsInput,
     UpdateBookingInput,
-    DeleteBookingInput
+    DeleteBookingInput,
+    VerifyOTPInput
 )
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,8 @@ class BookingToolHandler:
     
     def create_booking(
         self, 
-        user_phone: str, 
+        user_phone: str,
+        user_email: str,
         package_id: str, 
         number_of_people: int, 
         special_requests: str = "", 
@@ -154,6 +156,7 @@ class BookingToolHandler:
         try:
             params = {
                 "user_phone": user_phone,
+                "user_email": user_email,
                 "package_id": package_id,
                 "number_of_people": number_of_people
             }
@@ -241,6 +244,27 @@ class BookingToolHandler:
         except Exception as e:
             logger.error(f"Error in delete_booking: {e}")
             return {"success": False, "error": f"Failed to delete booking: {str(e)}"}
+        
+        if result is None:
+            return {"success": False, "error": "No response from MCP server"}
+        
+        return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
+    
+    def verify_otp_and_confirm_booking(self, booking_id: str, otp_code: str) -> Dict[str, Any]:
+        """Verify OTP code and confirm booking"""
+        try:
+            params = {
+                "booking_id": booking_id,
+                "otp_code": otp_code
+            }
+            
+            result = self.mcp_client.call_tool_sync("verify_otp_and_confirm_booking", params)
+        except concurrent.futures.TimeoutError:
+            logger.error("verify_otp_and_confirm_booking timeout")
+            return {"success": False, "error": "Request timeout"}
+        except Exception as e:
+            logger.error(f"Error in verify_otp_and_confirm_booking: {e}")
+            return {"success": False, "error": f"Failed to verify OTP: {str(e)}"}
         
         if result is None:
             return {"success": False, "error": "No response from MCP server"}
@@ -435,7 +459,7 @@ class MCPToolFactory:
         return StructuredTool.from_function(
             func=self.booking_handler.create_booking,
             name="create_booking",
-            description="Tạo booking mới cho user - YÊU CẦU THU THẬP ĐẦY ĐỦ THÔNG TIN TRƯỚC KHI GỌI (user_phone, package_id, number_of_people)",
+            description="Tạo booking mới cho user - YÊU CẦU THU THẬP ĐẦY ĐỦ THÔNG TIN TRƯỚC KHI GỌI (user_phone, user_email, package_id, number_of_people). Hệ thống sẽ gửi mã OTP về email để xác nhận.",
             args_schema=CreateBookingInput
         )
     
@@ -464,6 +488,15 @@ class MCPToolFactory:
             name="delete_booking",
             description="Hủy (cancel) booking và trả lại slot cho tour. Dữ liệu booking được giữ lại với trạng thái 'cancelled' (soft delete).",
             args_schema=DeleteBookingInput
+        )
+    
+    def verify_otp_and_confirm_booking_tool(self) -> StructuredTool:
+        """Create StructuredTool for verify_otp_and_confirm_booking"""
+        return StructuredTool.from_function(
+            func=self.booking_handler.verify_otp_and_confirm_booking,
+            name="verify_otp_and_confirm_booking",
+            description="Xác thực mã OTP và xác nhận booking. Gọi tool này khi user cung cấp mã OTP 6 số từ email. Sau khi verify thành công, booking sẽ được chuyển sang trạng thái 'confirmed'.",
+            args_schema=VerifyOTPInput
         )
     
     # Search Tools
@@ -591,6 +624,9 @@ def update_booking_tool() -> StructuredTool:
 
 def delete_booking_tool() -> StructuredTool:
     return _tool_factory.delete_booking_tool()
+
+def verify_otp_and_confirm_booking_tool() -> StructuredTool:
+    return _tool_factory.verify_otp_and_confirm_booking_tool()
 
 def search_tour_packages_tool() -> StructuredTool:
     return _tool_factory.search_tour_packages_tool()

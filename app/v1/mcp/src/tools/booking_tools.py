@@ -6,13 +6,16 @@ from fastmcp import FastMCP
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import logging
+import random
 from app.v1.core.supabase import get_supabase_client
+from app.v1.services.otp_service import get_otp_service
 from pydantic import ValidationError
 from app.v1.mcp.src.schema import (
     CreateBookingInput,
     UpdateBookingInput,
     DeleteBookingInput,
-    GetUserBookingsInput
+    GetUserBookingsInput,
+    VerifyOTPInput
 )
 
 # Logger
@@ -21,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 async def _create_booking_impl(
     user_phone: str,
+    user_email: str,
     package_id: str,
     number_of_people: int,
     special_requests: Optional[str] = None,
@@ -86,7 +90,7 @@ async def _create_booking_impl(
                 user = create_res.data[0]
                 logger.info(f"Created user: {user}")
 
-        # 3. Create Booking
+        # 3. Create Booking với status "otp_sent"
         total_amount = float(package['price']) * number_of_people
         booking_data = {
             "user_id": user['user_id'],
@@ -96,7 +100,7 @@ async def _create_booking_impl(
             "contact_name": user.get('full_name', user_phone),
             "contact_phone": user_phone,
             "special_requests": special_requests or "",
-            "status": "pending",
+            "status": "otp_sent",
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat()
         }
@@ -106,25 +110,64 @@ async def _create_booking_impl(
              return {"success": False, "error": "Database error: Failed to insert booking."}
         
         booking = booking_res.data[0]
+        booking_id = booking['booking_id']
 
-        # 4. Update Slots
+        # 4. Generate OTP (6 số)
+        otp_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        # 5. Lưu OTP vào otp_verifications table
+        otp_data = {
+            "booking_id": booking_id,
+            "otp_code": otp_code,
+            "phone_number": user_phone
+            # expires_at sẽ tự động set bởi trigger (created_at + 5 phút)
+            # Note: user_id không có trong schema otp_verifications table
+        }
+        try:
+            otp_insert_res = supabase.table("otp_verifications").insert(otp_data).execute()
+            if not otp_insert_res.data:
+                logger.error("Failed to insert OTP record")
+                # Rollback booking
+                supabase.table("bookings").delete().eq("booking_id", booking_id).execute()
+                return {"success": False, "error": "Failed to create OTP record"}
+        except Exception as e:
+            logger.error(f"Error inserting OTP: {str(e)}")
+            # Rollback booking
+            supabase.table("bookings").delete().eq("booking_id", booking_id).execute()
+            return {"success": False, "error": f"Failed to create OTP: {str(e)}"}
+        
+        # 6. Gửi OTP qua email bằng SendGrid
+        otp_service = get_otp_service()
+        email_sent = otp_service.send_otp_email(
+            email=user_email,
+            otp=otp_code,
+            tour_name=package['package_name']
+        )
+        
+        if not email_sent:
+            logger.warning(f"⚠️ Failed to send OTP email to {user_email}, but booking and OTP record created. OTP code: {otp_code}")
+            logger.warning("⚠️ User can still verify OTP manually if they know the code, but email notification failed.")
+
+        # 7. Update Slots
         new_slots = package['available_slots'] - number_of_people
         supabase.table("tour_packages").update({"available_slots": new_slots}).eq("package_id", package_id).execute()
 
-        # 5. Return Success
+        # 8. Return Success với awaiting_otp flag
         return {
             "success": True,
-            "booking_id": booking['booking_id'],
-            "message": "✅ ĐẶT TOUR THÀNH CÔNG!",
+            "booking_id": booking_id,
+            "message": "📧 Mã OTP đã được gửi về email của bạn. Vui lòng kiểm tra email và nhập mã OTP để xác nhận đặt tour.",
+            "awaiting_otp": True,
             "confirmation": {
-                "booking_id": booking['booking_id'],
+                "booking_id": booking_id,
                 "tour_name": package['package_name'],
                 "destination": package['destination'],
                 "start_date": package['start_date'],
                 "number_of_people": number_of_people,
                 "total_amount": total_amount,
-                "status": "pending",
-                "contact_phone": user_phone
+                "status": "otp_sent",
+                "contact_phone": user_phone,
+                "email": user_email
             }
         }
 
@@ -279,6 +322,7 @@ def register_booking_tools(mcp: FastMCP):
     @mcp.tool()
     async def create_booking(
         user_phone: str,
+        user_email: str,
         package_id: str,
         number_of_people: int,
         special_requests: Optional[str] = None,
@@ -286,10 +330,24 @@ def register_booking_tools(mcp: FastMCP):
     ) -> Dict[str, Any]:
         """
         Create a new tour booking for a user.
+        
+        REQUIRED PARAMETERS:
+        - user_phone: User's phone number (Vietnamese format, e.g., '0901234567')
+        - user_email: User's email address (REQUIRED - OTP will be sent to this email)
+        - package_id: Tour package UUID (exactly as returned from search_tour_packages)
+        - number_of_people: Number of people (1-50)
+        
+        OPTIONAL PARAMETERS:
+        - special_requests: Special requests or dietary restrictions
+        - user_id: User ID if available (for authenticated users, auto-injected if not provided)
+        
+        IMPORTANT: You MUST collect user_email from the user before calling this tool.
+        After calling, system will send OTP code to user_email and return awaiting_otp=True.
         """
         try:
             validated = CreateBookingInput(
                 user_phone=user_phone,
+                user_email=user_email,
                 package_id=package_id,
                 number_of_people=number_of_people,
                 special_requests=special_requests,
@@ -297,6 +355,7 @@ def register_booking_tools(mcp: FastMCP):
             )
             return await _create_booking_impl(
                 user_phone=validated.user_phone,
+                user_email=validated.user_email,
                 package_id=validated.package_id,
                 number_of_people=validated.number_of_people,
                 special_requests=validated.special_requests,
@@ -337,6 +396,191 @@ def register_booking_tools(mcp: FastMCP):
                 booking_id=validated.booking_id,
                 number_of_people=validated.number_of_people,
                 special_requests=validated.special_requests
+            )
+        except ValidationError as e:
+            return {"success": False, "error": f"Input Validation Error: {str(e)}"}
+
+    async def _verify_otp_impl(booking_id: str, otp_code: str) -> Dict[str, Any]:
+        """Verify OTP và confirm booking"""
+        try:
+            supabase = get_supabase_client()
+            
+            # 1. Get OTP record - First check if booking exists
+            booking_check = supabase.table("otp_verifications")\
+                .select("*")\
+                .eq("booking_id", booking_id)\
+                .execute()
+            
+            if not booking_check.data:
+                return {"success": False, "error": "Không tìm thấy mã OTP cho booking này"}
+            
+            # 2. Get OTP record with correct code and not verified
+            # NOTE: Do NOT filter by expires_at in query - check expiry in code after getting record
+            # This allows us to distinguish between wrong code vs expired
+            otp_res = supabase.table("otp_verifications")\
+                .select("*")\
+                .eq("booking_id", booking_id)\
+                .eq("otp_code", otp_code)\
+                .eq("is_verified", False)\
+                .execute()
+            
+            if not otp_res.data:
+                # OTP code is wrong - increment attempts
+                existing_otp = supabase.table("otp_verifications")\
+                    .select("attempts, otp_code, expires_at, created_at")\
+                    .eq("booking_id", booking_id)\
+                    .execute()
+                
+                if existing_otp.data:
+                    otp_info = existing_otp.data[0]
+                    current_attempts = otp_info.get("attempts", 0)
+                    stored_otp = otp_info.get("otp_code", "")
+                    
+                    # Increment attempts
+                    supabase.table("otp_verifications")\
+                        .update({"attempts": current_attempts + 1})\
+                        .eq("booking_id", booking_id)\
+                        .execute()
+                    
+                    # Check if it's wrong code vs expired
+                    expires_at_str = otp_info.get('expires_at')
+                    if expires_at_str:
+                        from datetime import timezone
+                        if isinstance(expires_at_str, str):
+                            if expires_at_str.endswith('Z'):
+                                expires_at_str = expires_at_str.replace('Z', '+00:00')
+                            expires_at = datetime.fromisoformat(expires_at_str)
+                        else:
+                            expires_at = expires_at_str
+                        
+                        if expires_at.tzinfo is None:
+                            expires_at = expires_at.replace(tzinfo=timezone.utc)
+                        else:
+                            expires_at = expires_at.astimezone(timezone.utc)
+                        
+                        now_utc = datetime.now(timezone.utc)
+                        if now_utc > expires_at:
+                            logger.warning(f"OTP expired: expires_at={expires_at}, now={now_utc}")
+                            return {"success": False, "error": "Mã OTP đã hết hạn"}
+                    
+                    logger.warning(f"Wrong OTP code: provided={otp_code}, stored={stored_otp}")
+                    return {"success": False, "error": "Mã OTP không đúng"}
+                
+                return {"success": False, "error": "Mã OTP không đúng"}
+            
+            otp_record = otp_res.data[0]
+            
+            # 3. Check expiry - Fix timezone comparison issue
+            expires_at_str = otp_record['expires_at']
+            created_at_str = otp_record.get('created_at')
+            
+            from datetime import timezone
+            
+            # Parse expires_at and ensure UTC timezone
+            if isinstance(expires_at_str, str):
+                # Handle different datetime formats from database
+                if expires_at_str.endswith('Z'):
+                    expires_at_str = expires_at_str.replace('Z', '+00:00')
+                expires_at = datetime.fromisoformat(expires_at_str)
+            else:
+                expires_at = expires_at_str
+            
+            # Ensure expires_at is timezone-aware (assume UTC if not)
+            if expires_at.tzinfo is None:
+                # If no timezone, assume UTC (database TIMESTAMP without timezone defaults to UTC in Supabase)
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            else:
+                # Convert to UTC for consistent comparison
+                expires_at = expires_at.astimezone(timezone.utc)
+            
+            # Get current time in UTC
+            now_utc = datetime.now(timezone.utc)
+            
+            # Log for debugging - show raw values and parsed values
+            logger.info(f"🔍 OTP expiry check for booking {booking_id}:")
+            logger.info(f"   Raw expires_at from DB: {expires_at_str}")
+            logger.info(f"   Parsed expires_at (UTC): {expires_at}")
+            logger.info(f"   Current time (UTC): {now_utc}")
+            logger.info(f"   Created_at: {created_at_str}")
+            
+            remaining_seconds = (expires_at - now_utc).total_seconds()
+            logger.info(f"   ⏱️ Time remaining: {remaining_seconds:.2f} seconds ({remaining_seconds/60:.2f} minutes)")
+            
+            # Compare in UTC - only expire if current time is AFTER expires_at
+            if now_utc > expires_at:
+                time_diff = (now_utc - expires_at).total_seconds()
+                logger.error(f"❌ OTP EXPIRED: expires_at={expires_at}, now={now_utc}, expired by {time_diff:.2f} seconds")
+                return {"success": False, "error": "Mã OTP đã hết hạn"}
+            
+            logger.info(f"✅ OTP is still valid - {remaining_seconds:.2f} seconds remaining")
+            
+            # 3. Check attempts (max 3)
+            if otp_record.get('attempts', 0) >= 3:
+                return {"success": False, "error": "Đã vượt quá số lần nhập OTP cho phép"}
+            
+            # 4. Mark OTP as verified
+            supabase.table("otp_verifications")\
+                .update({
+                    "is_verified": True,
+                    "verified_at": datetime.now().isoformat()
+                })\
+                .eq("booking_id", booking_id)\
+                .execute()
+            
+            # 5. Confirm booking (change status to "confirmed")
+            supabase.table("bookings")\
+                .update({"status": "confirmed"})\
+                .eq("booking_id", booking_id)\
+                .execute()
+            
+            # 6. Get booking details for response
+            booking_res = supabase.table("bookings")\
+                .select("*, tour_packages(package_name, destination, start_date, price)")\
+                .eq("booking_id", booking_id)\
+                .execute()
+            
+            booking = booking_res.data[0] if booking_res.data else {}
+            pkg = booking.get('tour_packages', {})
+            if isinstance(pkg, list) and pkg:
+                pkg = pkg[0]
+            elif not isinstance(pkg, dict):
+                pkg = {}
+            
+            return {
+                "success": True,
+                "message": "✅ Xác thực thành công! Đặt tour của bạn đã được xác nhận.",
+                "booking_id": booking_id,
+                "confirmation": {
+                    "booking_id": booking_id,
+                    "tour_name": pkg.get('package_name', 'Unknown Tour'),
+                    "destination": pkg.get('destination', 'Unknown'),
+                    "start_date": pkg.get('start_date'),
+                    "number_of_people": booking.get('number_of_people'),
+                    "total_amount": booking.get('total_amount'),
+                    "status": "confirmed"
+                }
+            }
+        except Exception as e:
+            logger.error(f"Verify OTP error: {str(e)}")
+            return {"success": False, "error": f"System error: {str(e)}"}
+
+    @mcp.tool()
+    async def verify_otp_and_confirm_booking(
+        booking_id: str,
+        otp_code: str
+    ) -> Dict[str, Any]:
+        """
+        Verify OTP code and confirm booking.
+        Use this tool when user provides the OTP code from their email.
+        """
+        try:
+            validated = VerifyOTPInput(
+                booking_id=booking_id,
+                otp_code=otp_code
+            )
+            return await _verify_otp_impl(
+                booking_id=validated.booking_id,
+                otp_code=validated.otp_code
             )
         except ValidationError as e:
             return {"success": False, "error": f"Input Validation Error: {str(e)}"}
