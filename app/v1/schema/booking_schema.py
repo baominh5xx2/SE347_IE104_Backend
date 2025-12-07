@@ -15,7 +15,8 @@ class BookingBase(BaseModel):
     contact_phone: str = Field(..., min_length=10, max_length=20, description="Số điện thoại liên hệ")
     special_requests: Optional[str] = Field(None, max_length=500, description="Yêu cầu đặc biệt")
     user_id: UUID = Field(..., description="ID của người dùng đặt tour")
-    promotion_id: Optional[UUID] = Field(None, description="ID của mã khuyến mãi (nếu có)")
+    promotion_id: Optional[UUID] = Field(None, description="ID của mã khuyến mãi (nếu có) - dùng promotion_id HOẶC promotion_code")
+    promotion_code: Optional[str] = Field(None, description="Mã khuyến mãi 8 ký tự (VD: ABC12345) - ưu tiên dùng code thay vì ID")
 
 
 class BookingCreate(BookingBase):
@@ -29,7 +30,7 @@ class BookingCreate(BookingBase):
                 "contact_phone": "0123456789",
                 "special_requests": "Phòng view đẹp",
                 "user_id": "9b3d0691-eccd-4a81-9f43-383f5be344b8",
-                "promotion_id": "550e8400-e29b-41d4-a716-446655440000"
+                "promotion_code": "ABC12345"
             }
         }
     )
@@ -41,7 +42,7 @@ class BookingUpdate(BaseModel):
             "example": {
                 "number_of_people": 3,
                 "contact_phone": "0987654321",
-                "promotion_id": "550e8400-e29b-41d4-a716-446655440000",
+                "promotion_code": "XYZ98765",
                 "status": "confirmed"
             }
         }
@@ -52,6 +53,7 @@ class BookingUpdate(BaseModel):
     contact_phone: Optional[str] = Field(None, min_length=10, max_length=20, description="Số điện thoại")
     special_requests: Optional[str] = Field(None, max_length=500, description="Yêu cầu đặc biệt")
     promotion_id: Optional[UUID] = Field(None, description="ID mã khuyến mãi (total_amount sẽ tự động tính lại)")
+    promotion_code: Optional[str] = Field(None, description="Mã khuyến mãi 8 ký tự (ưu tiên dùng code)")
     status: Optional[str] = Field(None, description="Trạng thái booking (pending/confirmed/cancelled/completed)")
 
 

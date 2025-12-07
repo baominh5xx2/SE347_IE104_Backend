@@ -498,7 +498,7 @@ async def test_create_booking_with_special_requests(booking_service, mock_supaba
 # Test create_booking with promotion
 @pytest.mark.asyncio
 async def test_create_booking_with_promotion_percentage(booking_service, mock_supabase, sample_booking_data):
-    """Test creating booking with percentage promotion"""
+    """Test creating booking with percentage promotion using promotion_id"""
     promotion_id = str(uuid4())
     sample_booking_data["promotion_id"] = promotion_id
     
@@ -636,6 +636,162 @@ async def test_create_booking_with_invalid_promotion(booking_service, mock_supab
         assert result["data"]["total_amount"] == original_amount
 
 
+@pytest.mark.asyncio
+async def test_create_booking_with_promotion_code(booking_service, mock_supabase, sample_booking_data):
+    """Test creating booking with promotion_code instead of promotion_id"""
+    promotion_id = str(uuid4())
+    promotion_code = "SUMMER20"
+    sample_booking_data["promotion_code"] = promotion_code
+    
+    # Mock package
+    mock_package_result = MagicMock()
+    mock_package_result.data = [{
+        "available_slots": 10,
+        "is_active": True,
+        "price": 2500000
+    }]
+    
+    # Mock get_promotion_by_code
+    with patch.object(booking_service.promotion_service, 'get_promotion_by_code', new_callable=AsyncMock) as mock_get_by_code:
+        mock_get_by_code.return_value = {
+            "EC": 0,
+            "EM": "Promotion found",
+            "promotion": {
+                "promotion_id": promotion_id,
+                "code": promotion_code,
+                "discount_type": "PERCENTAGE",
+                "discount_value": 20
+            }
+        }
+        
+        # Mock apply_promotion_to_booking
+        with patch.object(booking_service.promotion_service, 'apply_promotion_to_booking', new_callable=AsyncMock) as mock_apply_promo:
+            original_amount = 2500000 * 2
+            final_amount = original_amount * 0.8  # 20% discount
+            
+            mock_apply_promo.return_value = {
+                "EC": 0,
+                "EM": "Promotion applied successfully",
+                "final_price": final_amount,
+                "discount_amount": original_amount * 0.2
+            }
+            
+            # Mock booking insert
+            mock_booking_result = MagicMock()
+            mock_booking_result.data = [{
+                "booking_id": str(uuid4()),
+                "package_id": sample_booking_data["package_id"],
+                "user_id": sample_booking_data["user_id"],
+                "number_of_people": sample_booking_data["number_of_people"],
+                "contact_name": sample_booking_data["contact_name"],
+                "contact_phone": sample_booking_data["contact_phone"],
+                "status": "pending",
+                "total_amount": final_amount,
+                "promotion_id": promotion_id  # Should save the resolved promotion_id
+            }]
+            
+            mock_update_result = MagicMock()
+            mock_update_result.data = [{"available_slots": 8}]
+            
+            def table_side_effect(table_name):
+                if table_name == "tour_packages":
+                    tp_root = MagicMock()
+                    tp_select = MagicMock()
+                    tp_update = MagicMock()
+                    
+                    tp_root.select.return_value = tp_select
+                    tp_select.eq.return_value = tp_select
+                    tp_select.execute.return_value = mock_package_result
+                    
+                    tp_root.update.return_value = tp_update
+                    tp_update.eq.return_value = tp_update
+                    tp_update.execute.return_value = mock_update_result
+                    
+                    return tp_root
+                else:
+                    bk = MagicMock()
+                    bk.insert.return_value = bk
+                    bk.execute.return_value = mock_booking_result
+                    return bk
+            
+            mock_supabase.table.side_effect = table_side_effect
+            
+            result = await booking_service.create_booking(sample_booking_data)
+            
+            assert result["EC"] == 0
+            assert result["data"]["total_amount"] == final_amount
+            assert result["data"]["promotion_id"] == promotion_id
+            mock_get_by_code.assert_called_once_with(promotion_code)
+            mock_apply_promo.assert_called_once_with(promotion_id, original_amount)
+
+
+@pytest.mark.asyncio
+async def test_create_booking_with_invalid_promotion_code(booking_service, mock_supabase, sample_booking_data):
+    """Test creating booking with invalid promotion_code"""
+    promotion_code = "INVALID1"
+    sample_booking_data["promotion_code"] = promotion_code
+    
+    # Mock package
+    mock_package_result = MagicMock()
+    mock_package_result.data = [{
+        "available_slots": 10,
+        "is_active": True,
+        "price": 2500000
+    }]
+    
+    # Mock get_promotion_by_code - code not found
+    with patch.object(booking_service.promotion_service, 'get_promotion_by_code', new_callable=AsyncMock) as mock_get_by_code:
+        mock_get_by_code.return_value = {
+            "EC": 1,
+            "EM": "Promotion not found with code: INVALID1",
+            "promotion": None
+        }
+        
+        # Mock booking insert (without promotion)
+        original_amount = 2500000 * 2
+        mock_booking_result = MagicMock()
+        mock_booking_result.data = [{
+            **sample_booking_data,
+            "booking_id": str(uuid4()),
+            "status": "pending",
+            "total_amount": original_amount,
+            "promotion_id": None
+        }]
+        
+        mock_update_result = MagicMock()
+        mock_update_result.data = [{"available_slots": 8}]
+        
+        def table_side_effect(table_name):
+            if table_name == "tour_packages":
+                tp_root = MagicMock()
+                tp_select = MagicMock()
+                tp_update = MagicMock()
+                
+                tp_root.select.return_value = tp_select
+                tp_select.eq.return_value = tp_select
+                tp_select.execute.return_value = mock_package_result
+                
+                tp_root.update.return_value = tp_update
+                tp_update.eq.return_value = tp_update
+                tp_update.execute.return_value = mock_update_result
+                
+                return tp_root
+            else:
+                bk = MagicMock()
+                bk.insert.return_value = bk
+                bk.execute.return_value = mock_booking_result
+                return bk
+        
+        mock_supabase.table.side_effect = table_side_effect
+        
+        result = await booking_service.create_booking(sample_booking_data)
+        
+        # Should still create booking but without promotion
+        assert result["EC"] == 0
+        assert result["data"]["total_amount"] == original_amount
+        mock_get_by_code.assert_called_once_with(promotion_code)
+
+
 # Test update_booking with promotion
 @pytest.mark.asyncio
 async def test_update_booking_add_promotion(booking_service, mock_supabase, sample_booking_response):
@@ -756,6 +912,86 @@ async def test_update_booking_remove_promotion(booking_service, mock_supabase, s
         assert result["EC"] == 0
         assert result["data"]["promotion_id"] is None
         assert result["data"]["total_amount"] == original_amount
+
+
+@pytest.mark.asyncio
+async def test_update_booking_with_promotion_code(booking_service, mock_supabase, sample_booking_response):
+    """Test updating booking with promotion_code"""
+    promotion_id = str(uuid4())
+    promotion_code = "NEWYEAR25"
+    
+    with patch.object(booking_service, 'get_booking_by_id', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {
+            "EC": 0,
+            "EM": "Success",
+            "data": sample_booking_response
+        }
+        
+        # Mock package
+        mock_pkg_result = MagicMock()
+        mock_pkg_result.data = [{
+            "available_slots": 10,
+            "price": 2500000
+        }]
+        
+        # Mock get_promotion_by_code
+        with patch.object(booking_service.promotion_service, 'get_promotion_by_code', new_callable=AsyncMock) as mock_get_by_code:
+            mock_get_by_code.return_value = {
+                "EC": 0,
+                "EM": "Promotion found",
+                "promotion": {
+                    "promotion_id": promotion_id,
+                    "code": promotion_code,
+                    "discount_type": "PERCENTAGE",
+                    "discount_value": 25
+                }
+            }
+            
+            # Mock promotion service
+            with patch.object(booking_service.promotion_service, 'apply_promotion_to_booking', new_callable=AsyncMock) as mock_apply_promo:
+                original_amount = 2500000 * sample_booking_response["number_of_people"]
+                final_amount = original_amount * 0.75  # 25% discount
+                
+                mock_apply_promo.return_value = {
+                    "EC": 0,
+                    "EM": "Promotion applied successfully",
+                    "final_price": final_amount,
+                    "discount_amount": original_amount * 0.25
+                }
+                
+                # Mock updated booking
+                updated_booking = sample_booking_response.copy()
+                updated_booking["promotion_id"] = promotion_id
+                updated_booking["total_amount"] = final_amount
+                
+                mock_update_result = MagicMock()
+                mock_update_result.data = [updated_booking]
+                
+                def table_side_effect(table_name):
+                    if table_name == "tour_packages":
+                        tp = MagicMock()
+                        tp.select.return_value = tp
+                        tp.eq.return_value = tp
+                        tp.execute.return_value = mock_pkg_result
+                        return tp
+                    else:
+                        bk = MagicMock()
+                        bk.update.return_value = bk
+                        bk.eq.return_value = bk
+                        bk.execute.return_value = mock_update_result
+                        return bk
+                
+                mock_supabase.table.side_effect = table_side_effect
+                
+                result = await booking_service.update_booking(
+                    sample_booking_response["booking_id"],
+                    {"promotion_code": promotion_code}
+                )
+                
+                assert result["EC"] == 0
+                assert result["data"]["promotion_id"] == promotion_id
+                assert result["data"]["total_amount"] == final_amount
+                mock_get_by_code.assert_called_once_with(promotion_code)
 
 
 @pytest.mark.asyncio

@@ -38,6 +38,8 @@ async def create_promotion(
     """
     Tạo mới một mã khuyến mãi
     
+    Mã khuyến mãi (code) sẽ được tự động tạo gồm 8 ký tự ngẫu nhiên (chữ hoa và số)
+    
     Example:
         POST /api/v1/promotions
         Body:
@@ -51,6 +53,8 @@ async def create_promotion(
             "quantity": 100,
             "is_active": true
         }
+        
+        Response sẽ có thêm trường "code" (VD: "ABC12345")
     """
     try:
         promotion_data = promotion.model_dump()
@@ -138,6 +142,32 @@ async def get_promotion(
         raise
     except Exception as e:
         logger.error(f"Error in get_promotion endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/code/{code}", response_model=PromotionDetailResponse)
+async def get_promotion_by_code(
+    code: str,
+    service: PromotionService = Depends(get_promotion_service)
+):
+    """
+    Lấy thông tin chi tiết một mã khuyến mãi bằng code
+    
+    Example:
+        GET /api/v1/promotions/code/ABC12345
+    """
+    try:
+        result = await service.get_promotion_by_code(code)
+        
+        if result["EC"] == 1:
+            raise HTTPException(status_code=404, detail=result["EM"])
+        
+        return PromotionDetailResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_promotion_by_code endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

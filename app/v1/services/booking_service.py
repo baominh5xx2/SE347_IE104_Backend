@@ -168,8 +168,20 @@ class BookingService:
             final_amount = original_amount
             discount_amount = 0
             promotion_id = booking_data.get('promotion_id')
+            promotion_code = booking_data.get('promotion_code')
             
-            # Apply promotion if provided
+            # Resolve promotion: prioritize code over id
+            if promotion_code:
+                # Get promotion by code
+                promo_lookup = await self.promotion_service.get_promotion_by_code(promotion_code)
+                if promo_lookup['EC'] == 0:
+                    promotion_id = promo_lookup['promotion']['promotion_id']
+                    logger.info(f"Resolved promotion code {promotion_code} to ID {promotion_id}")
+                else:
+                    logger.warning(f"Invalid promotion code: {promotion_code}")
+                    promotion_id = None
+            
+            # Apply promotion if we have a valid ID
             if promotion_id:
                 promo_result = await self.promotion_service.apply_promotion_to_booking(
                     str(promotion_id),
@@ -299,8 +311,8 @@ class BookingService:
                         .eq('package_id', old_booking['package_id']) \
                         .execute()
             
-            # Recalculate total_amount if number_of_people or promotion_id changed
-            if "number_of_people" in update_data or "promotion_id" in update_data:
+            # Recalculate total_amount if number_of_people or promotion_id/code changed
+            if "number_of_people" in update_data or "promotion_id" in update_data or "promotion_code" in update_data:
                 # Get the final number of people (new or old)
                 final_people = update_data.get('number_of_people', old_booking['number_of_people'])
                 
@@ -308,17 +320,34 @@ class BookingService:
                 original_amount = package['price'] * final_people
                 final_amount = original_amount
                 
-                # Check promotion
-                promotion_id = update_data.get('promotion_id', old_booking.get('promotion_id'))
+                # Resolve promotion: prioritize code over id
+                promotion_id = None
+                promotion_code = update_data.get('promotion_code')
                 
-                # If explicitly setting promotion_id to None, remove discount
-                if "promotion_id" in update_data and update_data['promotion_id'] is None:
-                    promotion_id = None
-                    update_data['promotion_id'] = None
-                elif "promotion_id" in update_data and update_data['promotion_id'] is not None:
-                    # Convert UUID to string for database
-                    update_data['promotion_id'] = str(update_data['promotion_id'])
-                    promotion_id = update_data['promotion_id']
+                if promotion_code:
+                    # Get promotion by code
+                    promo_lookup = await self.promotion_service.get_promotion_by_code(promotion_code)
+                    if promo_lookup['EC'] == 0:
+                        promotion_id = promo_lookup['promotion']['promotion_id']
+                        logger.info(f"Resolved promotion code {promotion_code} to ID {promotion_id}")
+                        update_data['promotion_id'] = str(promotion_id)
+                    else:
+                        logger.warning(f"Invalid promotion code: {promotion_code}")
+                        promotion_id = None
+                    # Remove promotion_code from update_data (not a DB column)
+                    del update_data['promotion_code']
+                elif "promotion_id" in update_data:
+                    # Use promotion_id directly
+                    promotion_id = update_data.get('promotion_id')
+                    # If explicitly setting promotion_id to None, remove discount
+                    if promotion_id is None:
+                        update_data['promotion_id'] = None
+                    else:
+                        # Convert UUID to string for database
+                        update_data['promotion_id'] = str(promotion_id)
+                else:
+                    # Keep old promotion if neither code nor id provided
+                    promotion_id = old_booking.get('promotion_id')
                 
                 # Apply promotion if exists
                 if promotion_id:
