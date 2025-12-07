@@ -3,6 +3,8 @@ Promotion Service
 Handles all promotion-related business logic
 """
 import logging
+import random
+import string
 from typing import Optional, Dict, Any, List
 from uuid import UUID
 from datetime import datetime
@@ -16,6 +18,16 @@ class PromotionService:
     
     def __init__(self, supabase_client: Client):
         self.supabase = supabase_client
+    
+    def _generate_promotion_code(self) -> str:
+        """
+        Tạo mã khuyến mãi ngẫu nhiên 8 ký tự (chữ và số)
+        
+        Returns:
+            str: Mã khuyến mãi 8 ký tự
+        """
+        characters = string.ascii_uppercase + string.digits
+        return ''.join(random.choice(characters) for _ in range(8))
     
     async def create_promotion(self, promotion_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -37,6 +49,10 @@ class PromotionService:
             # Set default values
             if 'used_count' not in promotion_data:
                 promotion_data['used_count'] = 0
+            
+            # Tạo mã khuyến mãi tự động
+            if 'code' not in promotion_data or not promotion_data['code']:
+                promotion_data['code'] = self._generate_promotion_code()
             
             # Insert into database
             result = self.supabase.table('promotions').insert(promotion_data).execute()
@@ -94,6 +110,43 @@ class PromotionService:
             
         except Exception as e:
             logger.error(f"Error getting promotion: {str(e)}")
+            return {
+                "EC": 2,
+                "EM": f"Error getting promotion: {str(e)}",
+                "promotion": None
+            }
+    
+    async def get_promotion_by_code(self, code: str) -> Dict[str, Any]:
+        """
+        Lấy thông tin chi tiết một promotion bằng code
+        
+        Args:
+            code: Mã khuyến mãi (8 ký tự)
+            
+        Returns:
+            Dict với EC, EM và promotion data
+        """
+        try:
+            result = self.supabase.table('promotions')\
+                .select('*')\
+                .eq('code', code)\
+                .execute()
+            
+            if not result.data:
+                return {
+                    "EC": 1,
+                    "EM": f"Promotion not found with code: {code}",
+                    "promotion": None
+                }
+            
+            return {
+                "EC": 0,
+                "EM": "Promotion found",
+                "promotion": result.data[0]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting promotion by code: {str(e)}")
             return {
                 "EC": 2,
                 "EM": f"Error getting promotion: {str(e)}",

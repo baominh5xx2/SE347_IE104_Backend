@@ -17,6 +17,7 @@ class PromotionCreate(BaseModel):
     end_date: datetime = Field(..., description="Ngày hết hạn")
     quantity: int = Field(default=5, ge=1, description="Số lượng mã ban đầu")
     is_active: bool = Field(default=True, description="Trạng thái kích hoạt")
+    # code sẽ được tự động tạo bởi service, không cần truyền vào
 
 
 class PromotionUpdate(BaseModel):
@@ -29,6 +30,7 @@ class PromotionUpdate(BaseModel):
     end_date: Optional[datetime] = Field(None, description="Ngày hết hạn")
     quantity: Optional[int] = Field(None, ge=1, description="Số lượng mã")
     is_active: Optional[bool] = Field(None, description="Trạng thái kích hoạt")
+    code: Optional[str] = Field(None, description="Mã khuyến mãi (8 ký tự)")
 
 
 class PromotionResponse(BaseModel):
@@ -43,6 +45,7 @@ class PromotionResponse(BaseModel):
     quantity: int
     used_count: int
     is_active: bool
+    code: str
     
     class Config:
         from_attributes = True
