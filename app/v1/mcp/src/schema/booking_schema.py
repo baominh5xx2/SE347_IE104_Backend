@@ -38,3 +38,9 @@ class VerifyOTPInput(BaseModel):
     """Input schema for verify_otp_and_confirm_booking tool"""
     booking_id: str = Field(..., description="Booking ID waiting for OTP")
     otp_code: str = Field(..., pattern="^[0-9]{6}$", description="6-digit OTP code")
+
+
+class CreatePaymentInput(BaseModel):
+    """Input schema for create_payment tool"""
+    booking_id: str = Field(..., description="UUID của booking cần thanh toán")
+    payment_method: str = Field(default="vnpay", description="Phương thức thanh toán (vnpay)")

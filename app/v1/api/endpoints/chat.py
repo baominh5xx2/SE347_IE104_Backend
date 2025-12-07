@@ -216,13 +216,22 @@ async def chat_stream(
                 
                 # Lưu assistant response vào database
                 try:
+                    # Prepare entities with MCP UI data
+                    entities_data = metadata.get("entities", {}) if metadata else {}
+                    if mcp_ui_resource:
+                        entities_data["mcp_ui_resource"] = mcp_ui_resource
+                    if mcp_ui_html:
+                        entities_data["mcp_ui_html"] = mcp_ui_html
+                    if tour_packages_for_ui and is_recommendation_response:
+                        entities_data["tour_packages"] = tour_packages_for_ui[:5]
+                    
                     chat_room_service.save_message(
                         room_id=room_id,
                         user_id=user_id,
                         role="assistant",
                         content=full_response,
                         intent=metadata.get("intent") if metadata else None,
-                        entities=metadata.get("entities") if metadata else None
+                        entities=entities_data if entities_data else None
                     )
                     
                     # Update room title từ message đầu tiên nếu chưa có title tùy chỉnh

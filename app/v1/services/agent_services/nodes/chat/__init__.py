@@ -262,14 +262,14 @@ class ChatAgentNodes:
                             
                             # === MCP-UI INTEGRATION ===
                             # Capture the UI Resource from the tool result
-                            if tool_name == "generate_tour_ui" and isinstance(result, dict):
+                            if tool_name in ["generate_tour_ui", "generate_payment_ui"] and isinstance(result, dict):
                                 # Support both legacy HTML and new UI Resource format
                                 html_content = result.get("html")
                                 ui_resource = result.get("ui_resource")
                                 
                                 if ui_resource:
                                     state["mcp_ui_resource"] = ui_resource
-                                    logger.info(f"✅ Saved MCP UI Resource to state (URI: {ui_resource.get('uri', 'unknown')})")
+                                    logger.info(f"✅ Saved MCP UI Resource to state (URI: {ui_resource.get('uri', 'unknown')}, type: {ui_resource.get('type', 'unknown')})")
                                 
                                 if html_content:
                                     state["mcp_ui_html"] = html_content

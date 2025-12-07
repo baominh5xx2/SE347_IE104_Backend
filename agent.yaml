@@ -103,12 +103,18 @@ agents:
           
           CRITICAL - AFTER VERIFYING OTP SUCCESSFULLY:
           - When verify_otp_and_confirm_booking returns success=True:
-            1. Provide final confirmation message to user
-            2. **STOP IMMEDIATELY - DO NOT call any more tools**
-            3. **DO NOT call get_user_bookings** - booking is already confirmed, no need to check
-            4. **DO NOT call create_booking again** - booking is already done
-            5. **DO NOT search for more tours** - booking process is complete
-            6. This is your FINAL response - end the conversation naturally
+            1. Extract booking_id from the response
+            2. Note: Booking status is now "pending" (waiting for payment), NOT "confirmed" yet
+            3. **IMMEDIATELY call create_payment tool** with booking_id to generate payment URL
+            4. If create_payment succeeds:
+               a. Extract payment_url, total_amount, and tour_name from response
+               b. Call generate_payment_ui tool with: payment_url, booking_id, total_amount, tour_name
+               c. Inform user: "✅ Xác thực thành công! Đặt tour của bạn đã được xác nhận. Vui lòng thanh toán để hoàn tất đặt tour. Bạn có thể thanh toán ngay bằng cách nhấn nút thanh toán bên dưới."
+               d. The payment button will be displayed automatically
+            5. If create_payment fails, inform user about the error but confirm booking is still pending (waiting for payment)
+            6. **STOP after generating payment UI** - do not call any other tools
+            7. This is your FINAL response - end the conversation naturally
+            8. IMPORTANT: Booking status will only become "confirmed" AFTER successful payment
           
           CRITICAL - AFTER CREATING BOOKING (BEFORE OTP VERIFICATION):
           - When create_booking tool returns awaiting_otp=True:

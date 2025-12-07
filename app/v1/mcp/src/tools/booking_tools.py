@@ -9,13 +9,16 @@ import logging
 import random
 from app.v1.core.supabase import get_supabase_client
 from app.v1.services.otp_service import get_otp_service
+from app.v1.services.payment_service import PaymentService
+from app.v1.services.agent_services.utils.ui_generator import generate_payment_button_html
 from pydantic import ValidationError
 from app.v1.mcp.src.schema import (
     CreateBookingInput,
     UpdateBookingInput,
     DeleteBookingInput,
     GetUserBookingsInput,
-    VerifyOTPInput
+    VerifyOTPInput,
+    CreatePaymentInput
 )
 
 # Logger
@@ -527,9 +530,9 @@ def register_booking_tools(mcp: FastMCP):
                 .eq("booking_id", booking_id)\
                 .execute()
             
-            # 5. Confirm booking (change status to "confirmed")
+            # 5. Set booking status to "pending" (waiting for payment)
             supabase.table("bookings")\
-                .update({"status": "confirmed"})\
+                .update({"status": "pending"})\
                 .eq("booking_id", booking_id)\
                 .execute()
             
@@ -548,7 +551,7 @@ def register_booking_tools(mcp: FastMCP):
             
             return {
                 "success": True,
-                "message": "✅ Xác thực thành công! Đặt tour của bạn đã được xác nhận.",
+                "message": "✅ Xác thực thành công! Đặt tour của bạn đã được xác nhận. Vui lòng thanh toán để hoàn tất đặt tour.",
                 "booking_id": booking_id,
                 "confirmation": {
                     "booking_id": booking_id,
@@ -557,7 +560,7 @@ def register_booking_tools(mcp: FastMCP):
                     "start_date": pkg.get('start_date'),
                     "number_of_people": booking.get('number_of_people'),
                     "total_amount": booking.get('total_amount'),
-                    "status": "confirmed"
+                    "status": "pending"
                 }
             }
         except Exception as e:
@@ -595,5 +598,158 @@ def register_booking_tools(mcp: FastMCP):
             return await _delete_booking_impl(booking_id=validated.booking_id, reason=validated.reason)
         except ValidationError as e:
             return {"success": False, "error": f"Input Validation Error: {str(e)}"}
+
+    @mcp.tool()
+    async def create_payment(
+        booking_id: str,
+        payment_method: str = "vnpay"
+    ) -> Dict[str, Any]:
+        """
+        Tạo payment request và generate VNPay URL cho booking.
+        Use this tool after OTP verification succeeds (status='pending') to create payment link.
+        After successful payment, booking status will be updated to 'confirmed'.
+        """
+        try:
+            validated = CreatePaymentInput(
+                booking_id=booking_id,
+                payment_method=payment_method
+            )
+            return await _create_payment_impl(
+                booking_id=validated.booking_id,
+                payment_method=validated.payment_method
+            )
+        except ValidationError as e:
+            return {"success": False, "error": f"Input Validation Error: {str(e)}"}
+
+    @mcp.tool()
+    async def generate_payment_ui(
+        payment_url: str,
+        booking_id: str,
+        total_amount: float,
+        tour_name: str,
+        payment_method: str = "vnpay"
+    ) -> Dict[str, Any]:
+        """
+        Generate payment button UI component for user to click and pay.
+        Use this tool after create_payment succeeds to show payment button to user.
+        """
+        try:
+            return await _generate_payment_ui_impl(
+                payment_url=payment_url,
+                booking_id=booking_id,
+                total_amount=total_amount,
+                tour_name=tour_name,
+                payment_method=payment_method
+            )
+        except Exception as e:
+            return {"success": False, "error": f"Error generating payment UI: {str(e)}"}
+    
+    logger.info("✅ Booking tools registered (including payment tools)")
+
+
+async def _create_payment_impl(booking_id: str, payment_method: str = "vnpay") -> Dict[str, Any]:
+    """Create payment và generate VNPay URL"""
+    try:
+        supabase = get_supabase_client()
+        payment_service = PaymentService(supabase)
+        
+        # Get client IP (default to 127.0.0.1 if not available in context)
+        # In MCP context, we don't have direct access to request, so use default
+        ip_addr = "127.0.0.1"
+        
+        # Call payment service
+        result = await payment_service.create_payment(
+            booking_id=booking_id,
+            payment_method=payment_method,
+            ip_addr=ip_addr
+        )
+        
+        if result["EC"] != 0:
+            return {
+                "success": False,
+                "error": result["EM"],
+                "error_code": result["EC"]
+            }
+        
+        payment_data = result["data"]
+        payment_url = payment_data.get("payment_url")
+        
+        if not payment_url:
+            return {
+                "success": False,
+                "error": "Payment URL not generated"
+            }
+        
+        # Get booking details for response
+        booking_res = supabase.table("bookings")\
+            .select("*, tour_packages(package_name, destination, start_date, price)")\
+            .eq("booking_id", booking_id)\
+            .execute()
+        
+        booking = booking_res.data[0] if booking_res.data else {}
+        pkg = booking.get('tour_packages', {})
+        if isinstance(pkg, list) and pkg:
+            pkg = pkg[0]
+        elif not isinstance(pkg, dict):
+            pkg = {}
+        
+        return {
+            "success": True,
+            "message": "Payment URL đã được tạo thành công. Bạn có thể thanh toán ngay.",
+            "booking_id": booking_id,
+            "payment_id": payment_data.get("payment_id"),
+            "payment_url": payment_url,
+            "payment_method": payment_method,
+            "amount": payment_data.get("amount"),
+            "booking_info": {
+                "booking_id": booking_id,
+                "tour_name": pkg.get('package_name', 'Unknown Tour'),
+                "destination": pkg.get('destination', 'Unknown'),
+                "total_amount": booking.get('total_amount'),
+                "number_of_people": booking.get('number_of_people')
+            }
+        }
+    except Exception as e:
+        logger.error(f"Create payment error: {str(e)}")
+        return {"success": False, "error": f"System error: {str(e)}"}
+
+
+async def _generate_payment_ui_impl(
+    payment_url: str,
+    booking_id: str,
+    total_amount: float,
+    tour_name: str,
+    payment_method: str = "vnpay"
+) -> Dict[str, Any]:
+    """Generate payment button UI component"""
+    try:
+        html = generate_payment_button_html(
+            payment_url=payment_url,
+            booking_id=booking_id,
+            total_amount=total_amount,
+            tour_name=tour_name,
+            payment_method=payment_method
+        )
+        
+        return {
+            "success": True,
+            "html": html,
+            "ui_resource": {
+                "uri": f"payment://{booking_id}",
+                "mimeType": "text/html",
+                "type": "payment_button",
+                "metadata": {
+                    "booking_id": booking_id,
+                    "total_amount": total_amount,
+                    "tour_name": tour_name,
+                    "payment_method": payment_method
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Generate payment UI error: {str(e)}")
+        return {"success": False, "error": f"System error: {str(e)}"}
+
+
     
    
