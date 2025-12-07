@@ -32,7 +32,7 @@ jobs:
             else
               echo "Project directory exists. Updating code..."
               cd "$PROJECT_DIR"
-              git pull origin main
+              git pull origin develop
             fi
             
             echo "=== Stopping existing containers ==="
