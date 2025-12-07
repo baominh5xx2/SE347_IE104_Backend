@@ -10,7 +10,8 @@ from .booking_schema import (
     UpdateBookingInput,
     DeleteBookingInput,
     GetUserBookingsInput,
-    VerifyOTPInput
+    VerifyOTPInput,
+    CreatePaymentInput
 )
 from .tour_search_schema import SearchTourPackagesInput, RequestRecommendationInput
 from .ui_schema import GenerateTourUIInput, TourPackageUIModel
@@ -28,6 +29,7 @@ __all__ = [
     "DeleteBookingInput",
     "GetUserBookingsInput",
     "VerifyOTPInput",
+    "CreatePaymentInput",
     # Tour Search
     "SearchTourPackagesInput",
     "RequestRecommendationInput",
