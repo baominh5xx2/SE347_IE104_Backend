@@ -1,56 +1,37 @@
-# Multi-stage Dockerfile for FastAPI Backend
-FROM python:3.11-slim as builder
+# Sử dụng Python 3.11 slim
+FROM python:3.11-slim
 
-# Install system dependencies
+# Cài đặt các thư viện hệ thống cần thiết
 RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv package manager
+# Cài đặt uv
 RUN pip install uv
 
-# Set working directory
+# Thiết lập thư mục làm việc
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml ./
+# Copy file cấu hình package
+COPY pyproject.toml .
 
-# Install dependencies using uv
-# Install from pyproject.toml (uv will read dependencies from it)
+# Cài đặt package bằng uv (cài thẳng vào system python cho lẹ, khỏi venv lằng nhằng)
 RUN uv pip install --system --no-cache-dir .
 
-# Production stage
-FROM python:3.11-slim
+# Copy toàn bộ code vào
+COPY . .
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
+# Tạo user để chạy cho an toàn (optional, nhưng tốt)
 RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app && \
     chown -R appuser:appuser /app
-
-# Set working directory
-WORKDIR /app
-
-# Copy virtual environment from builder
-COPY --from=builder /app/.venv /app/.venv
-
-# Copy application code
-COPY --chown=appuser:appuser . .
-
-# Switch to non-root user
 USER appuser
 
-# Expose port
+# Expose port (Backend bạn chạy port mấy thì sửa số này, ví dụ 8000)
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
-
-# Run application
-CMD ["/app/.venv/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Lệnh chạy server (Sửa lại cho đúng lệnh start của bạn)
+# Ví dụ nếu dùng FastAPI:
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Hoặc nếu dùng Python thường:
+# CMD ["python", "main.py"]
