@@ -9,6 +9,10 @@ from uuid import UUID
 from supabase import Client
 import openai
 import os
+from fastapi import UploadFile
+
+# Import Cloudinary config
+from ..core.cloudinary_config import CloudinaryConfig
 
 # Import search service from MCP tools
 try:
@@ -143,6 +147,68 @@ class TourPackageService:
         except Exception as e:
             logger.error(f"Error deleting embedding for package {package_id}: {str(e)}")
             return False
+    
+    async def upload_images(self, images: List[UploadFile]) -> List[str]:
+        """
+        Upload multiple images to Cloudinary
+        
+        Args:
+            images: List of UploadFile objects
+            
+        Returns:
+            List of uploaded image URLs
+        """
+        try:
+            files_data = []
+            
+            for image in images:
+                # Read file content
+                content = await image.read()
+                # Reset file pointer
+                await image.seek(0)
+                
+                files_data.append((content, image.filename))
+            
+            # Upload to Cloudinary
+            urls = CloudinaryConfig.upload_multiple_images(files_data, folder="tour_packages")
+            
+            logger.info(f"✓ Uploaded {len(urls)} images to Cloudinary")
+            return urls
+            
+        except Exception as e:
+            logger.error(f"✗ Error uploading images: {str(e)}")
+            return []
+    
+    async def delete_images_from_urls(self, image_urls: str) -> int:
+        """
+        Delete images from Cloudinary using URLs
+        
+        Args:
+            image_urls: Pipe-separated image URLs
+            
+        Returns:
+            Number of successfully deleted images
+        """
+        try:
+            if not image_urls:
+                return 0
+            
+            urls = image_urls.split("|")
+            public_ids = []
+            
+            for url in urls:
+                public_id = CloudinaryConfig.extract_public_id_from_url(url.strip())
+                if public_id:
+                    public_ids.append(public_id)
+            
+            deleted_count = CloudinaryConfig.delete_multiple_images(public_ids)
+            logger.info(f"✓ Deleted {deleted_count}/{len(public_ids)} images from Cloudinary")
+            
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"✗ Error deleting images: {str(e)}")
+            return 0
     
     async def get_all_packages(
         self, 
@@ -337,22 +403,36 @@ class TourPackageService:
                 .execute()
             
             if result.data:
-                updated_package = result.data[0]
+                # Fetch full updated record to ensure all fields are present
+                full_result = self.supabase.table('tour_packages') \
+                    .select('*') \
+                    .eq('package_id', package_id) \
+                    .single() \
+                    .execute()
                 
-                # Regenerate embedding if content fields were updated
-                content_fields = ['package_name', 'destination', 'description', 'cuisine', 'suitable_for']
-                if any(field in update_data for field in content_fields):
-                    embedding = await self._generate_embedding(updated_package)
-                    if embedding:
-                        await self._upsert_embedding(package_id, embedding)
-                    else:
-                        logger.warning(f"Failed to regenerate embedding for package {package_id}")
-                
-                return {
-                    "EC": 0,
-                    "EM": "Tour package updated successfully",
-                    "package": updated_package
-                }
+                if full_result.data:
+                    updated_package = full_result.data
+                    
+                    # Regenerate embedding if content fields were updated
+                    content_fields = ['package_name', 'destination', 'description', 'cuisine', 'suitable_for']
+                    if any(field in update_data for field in content_fields):
+                        embedding = await self._generate_embedding(updated_package)
+                        if embedding:
+                            await self._upsert_embedding(package_id, embedding)
+                        else:
+                            logger.warning(f"Failed to regenerate embedding for package {package_id}")
+                    
+                    return {
+                        "EC": 0,
+                        "EM": "Tour package updated successfully",
+                        "package": updated_package
+                    }
+                else:
+                    return {
+                        "EC": 2,
+                        "EM": "Failed to fetch updated tour package",
+                        "package": None
+                    }
             else:
                 return {
                     "EC": 2,
@@ -370,7 +450,7 @@ class TourPackageService:
     
     async def delete_package(self, package_id: str) -> Dict[str, Any]:
         """
-        Delete a tour package and its embedding
+        Delete a tour package, its embedding, and images from Cloudinary
         
         Args:
             package_id: UUID of the tour package to delete
@@ -387,7 +467,15 @@ class TourPackageService:
                     "EM": existing["EM"]
                 }
             
-            # Delete embedding first (if exists)
+            package = existing["package"]
+            
+            # Delete images from Cloudinary
+            if package.get("image_urls"):
+                logger.info(f"Deleting images from Cloudinary for package {package_id}")
+                deleted_count = await self.delete_images_from_urls(package["image_urls"])
+                logger.info(f"Deleted {deleted_count} images from Cloudinary")
+            
+            # Delete embedding (if exists)
             await self._delete_embedding(package_id)
             
             # Delete tour package

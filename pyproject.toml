@@ -40,7 +40,8 @@ dependencies = [
     "fastmcp>=0.2.0",
     "mem0ai>=1.0.0",
     "numpy>=1.24.0",
-    "mcp-ui-server" 
+    "mcp-ui-server",
+    "cloudinary>=1.36.0"
 ]
 
 [build-system]
