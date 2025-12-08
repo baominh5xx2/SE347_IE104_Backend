@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     VNPAY_URL: str = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"  # VNPay payment URL
     VNPAY_RETURN_URL: str = "http://localhost:8000/api/v1/payments/vnpay/return"  # Return URL after payment
     
+    # OTP & Email Configuration
+    OTP_EXPIRE_MINUTES: int = 5  # OTP hết hạn sau 5 phút
+    SENDGRID_API_KEY: str = ""  # SendGrid API key
+    SENDGRID_FROM_EMAIL: str = "noreply@yourdomain.com"  # Email gửi đi
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -17,6 +17,7 @@ from ...schema.booking_schema import (
 )
 from ...services.booking_service import BookingService
 from ...core.supabase import get_supabase_client
+from ...core.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -104,13 +105,18 @@ async def get_booking(
 @router.post("/", response_model=BookingCreateResponse, status_code=201)
 async def create_booking(
     booking: BookingCreate,
+    current_user: dict = Depends(get_current_user),
     service: BookingService = Depends(get_booking_service)
 ):
     """
     Tạo booking mới. `total_amount` tự tính = `price * number_of_people`.
     
+    - Admin: Tạo booking ngay với status "confirmed", không cần OTP
+    - User thường: Tạo booking với status "pending", cần OTP (nhưng API này không gửi OTP, chỉ có Chat Agent mới gửi)
+    
     Args:
         booking: Dữ liệu booking (package_id, number_of_people, contact_name, contact_phone, user_id, special_requests?)
+        current_user: Current authenticated user (from JWT token)
         service: Booking service instance
     
     Returns:
@@ -118,6 +124,16 @@ async def create_booking(
     """
     try:
         booking_data = booking.model_dump()
+        
+        # Check role
+        user_role = current_user.get("role", "user")
+        
+        if user_role == "admin":
+            # Admin: skip OTP, tạo booking confirmed ngay
+            booking_data["status"] = "confirmed"
+        else:
+            # User thường qua API: tạo pending (không có OTP flow ở API)
+            booking_data["status"] = "pending"
         
         result = await service.create_booking(booking_data)
         

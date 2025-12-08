@@ -278,3 +278,123 @@ def generate_tour_grid_html(packages: List[Dict[str, Any]]) -> str:
     
     return html
 
+
+def generate_payment_button_html(
+    payment_url: str,
+    booking_id: str,
+    total_amount: float,
+    tour_name: str,
+    payment_method: str = "vnpay"
+) -> str:
+    """
+    Generate HTML for payment button component
+    
+    Args:
+        payment_url: VNPay payment URL
+        booking_id: Booking ID
+        total_amount: Total amount to pay
+        tour_name: Tour package name
+        payment_method: Payment method (vnpay)
+        
+    Returns:
+        HTML string for payment button component
+    """
+    # Format price
+    formatted_price = f"{int(total_amount):,}".replace(",", ".")
+    
+    # Escape HTML để tránh XSS
+    def escape_html(text: str) -> str:
+        if not text:
+            return ""
+        return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#x27;")
+    
+    safe_tour_name = escape_html(tour_name)
+    safe_payment_url = escape_html(payment_url)
+    safe_booking_id = escape_html(booking_id)
+    
+    html = f"""
+    <div class="mcp-payment-button-wrapper" style="
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        padding: 0;
+        width: 100%;
+        max-width: 100%;
+        background: transparent;
+        margin: 16px 0;
+    ">
+        <div class="mcp-payment-card" style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            color: white;
+        ">
+            <div style="margin-bottom: 16px;">
+                <h3 style="
+                    margin: 0 0 8px 0;
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: white;
+                ">💳 Thanh toán đặt tour</h3>
+                <p style="
+                    margin: 0;
+                    font-size: 14px;
+                    color: rgba(255, 255, 255, 0.9);
+                    opacity: 0.95;
+                ">{safe_tour_name}</p>
+            </div>
+            
+            <div style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+                padding: 12px;
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 8px;
+                backdrop-filter: blur(10px);
+            ">
+                <span style="font-size: 14px; color: rgba(255, 255, 255, 0.9);">Tổng tiền:</span>
+                <span style="font-size: 20px; font-weight: 700; color: white;">{formatted_price} VNĐ</span>
+            </div>
+            
+            <button 
+                class="mcp-payment-button"
+                data-payment-url="{safe_payment_url}"
+                data-booking-id="{safe_booking_id}"
+                style="
+                    width: 100%;
+                    padding: 14px 24px;
+                    background: white;
+                    color: #667eea;
+                    border: none;
+                    border-radius: 10px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
+                "
+                onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0, 0, 0, 0.15)';"
+                onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0, 0, 0, 0.1)';"
+            >
+                <span>💳</span>
+                <span>Thanh toán ngay qua VNPay</span>
+            </button>
+            
+            <p style="
+                margin: 12px 0 0 0;
+                font-size: 12px;
+                color: rgba(255, 255, 255, 0.8);
+                text-align: center;
+            ">Bạn sẽ được chuyển đến trang thanh toán VNPay</p>
+        </div>
+    </div>
+    
+    """
+    
+    return html
+
