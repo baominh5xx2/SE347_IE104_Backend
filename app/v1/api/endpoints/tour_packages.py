@@ -2,8 +2,8 @@
 Tour Package API Endpoints
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from typing import Optional, List
 from uuid import UUID
 import csv
 import io
@@ -195,52 +195,109 @@ async def get_tour_package(
 
 @router.post("/", response_model=TourPackageCreateResponse, status_code=201)
 async def create_tour_package(
-    package: TourPackageCreate,
+    package_name: str = Form(..., description="Tên tour package", example="Tour Đà Lạt 3N2Đ"),
+    destination: str = Form(..., description="Điểm đến", example="Đà Lạt"),
+    description: str = Form(..., description="Mô tả chi tiết", example="Tour khám phá thành phố ngàn hoa với nhiều điểm tham quan đẹp"),
+    duration_days: int = Form(..., description="Số ngày tour (>0)", example=3, gt=0),
+    price: float = Form(..., description="Giá tour VNĐ (>0)", example=2500000, gt=0),
+    available_slots: int = Form(..., description="Số chỗ còn trống (≥0)", example=20, ge=0),
+    start_date: date = Form(..., description="Ngày bắt đầu (YYYY-MM-DD)", example="2024-12-10"),
+    end_date: date = Form(..., description="Ngày kết thúc (YYYY-MM-DD)", example="2024-12-13"),
+    cuisine: Optional[str] = Form(None, description="Ẩm thực", example="Ẩm thực miền Trung"),
+    suitable_for: Optional[str] = Form(None, description="Phù hợp cho", example="Gia đình, Cặp đôi"),
+    is_active: bool = Form(True, description="Trạng thái kích hoạt"),
+    images: List[UploadFile] = File(..., description="Tour images (max 10 ảnh, định dạng: JPEG/JPG/PNG/WebP)"),
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
-    Tạo mới một tour package
+    Tạo mới tour package với upload ảnh trực tiếp lên Cloudinary
+    
+    Endpoint này tự động:
+    - Upload ảnh lên Cloudinary
+    - Tạo tour package với URLs từ Cloudinary
+    - Rollback nếu có lỗi
     
     Args:
-        package: Dữ liệu tour package cần tạo
+        package_name: Tên gói tour
+        destination: Điểm đến
+        description: Mô tả chi tiết
+        duration_days: Số ngày tour (>0)
+        price: Giá tour VNĐ (>0)
+        available_slots: Số chỗ còn trống (≥0)
+        start_date: Ngày bắt đầu (YYYY-MM-DD)
+        end_date: Ngày kết thúc (YYYY-MM-DD)
+        cuisine: Ẩm thực (optional)
+        suitable_for: Phù hợp cho (optional)
+        is_active: Trạng thái kích hoạt
+        images: Danh sách file ảnh (tối đa 10 ảnh, định dạng: JPEG/JPG/PNG/WebP)
         service: Tour package service instance
         
     Returns:
-        TourPackageCreateResponse với thông tin tour package đã tạo
+        TourPackageCreateResponse với image_urls từ Cloudinary
         
     Example:
         POST /api/v1/tour-packages
-        Body:
-        {
-            "package_name": "Tour Đà Lạt 3N2Đ",
-            "destination": "Đà Lạt",
-            "description": "Tour khám phá thành phố ngàn hoa",
-            "duration_days": 3,
-            "price": 2500000,
-            "available_slots": 20,
-            "start_date": "2024-12-01",
-            "end_date": "2024-12-03",
-            "image_urls": "https://example.com/img1.jpg|https://example.com/img2.jpg",
-            "cuisine": "Ẩm thực miền Trung",
-            "suitable_for": "Gia đình, Cặp đôi",
-            "is_active": true
-        }
+        Content-Type: multipart/form-data
+        Form Data:
+            - package_name: "Tour Đà Lạt 3N2Đ"
+            - destination: "Đà Lạt"
+            - description: "Tour khám phá thành phố ngàn hoa"
+            - duration_days: 3
+            - price: 2500000
+            - available_slots: 20
+            - start_date: "2024-12-01"
+            - end_date: "2024-12-03"
+            - cuisine: "Ẩm thực miền Trung"
+            - suitable_for: "Gia đình, Cặp đôi"
+            - is_active: true
+            - images: [file1.jpg, file2.jpg, ...]
     """
     try:
-        # Convert to dict and handle date serialization
-        package_data = package.model_dump()
+        # Validate max 10 images
+        if len(images) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 images allowed")
         
-        # Convert dates to ISO format strings
-        if package_data.get('start_date'):
-            package_data['start_date'] = package_data['start_date'].isoformat()
-        if package_data.get('end_date'):
-            package_data['end_date'] = package_data['end_date'].isoformat()
+        # Validate image types
+        allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+        for image in images:
+            if image.content_type not in allowed_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid file type: {image.content_type}. Allowed: jpeg, jpg, png, webp"
+                )
         
+        # Upload images to Cloudinary
+        logger.info(f"Uploading {len(images)} images to Cloudinary...")
+        image_urls = await service.upload_images(images)
+        
+        if not image_urls:
+            raise HTTPException(status_code=500, detail="Failed to upload images")
+        
+        # Prepare package data
+        package_data = {
+            "package_name": package_name,
+            "destination": destination,
+            "description": description,
+            "duration_days": duration_days,
+            "price": price,
+            "available_slots": available_slots,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "image_urls": "|".join(image_urls),  # Pipe-separated URLs
+            "cuisine": cuisine,
+            "suitable_for": suitable_for,
+            "is_active": is_active
+        }
+        
+        # Create tour package
         result = await service.create_package(package_data)
         
         if result["EC"] != 0:
+            # Rollback: Delete uploaded images
+            await service.delete_images_from_urls(package_data["image_urls"])
             raise HTTPException(status_code=400, detail=result["EM"])
         
+        logger.info(f"✓ Created tour package with {len(image_urls)} images")
         return TourPackageCreateResponse(**result)
         
     except HTTPException:
@@ -257,7 +314,7 @@ async def update_tour_package(
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
-    Cập nhật thông tin tour package
+    Cập nhật thông tin tour package (JSON)
     
     Args:
         package_id: UUID của tour package cần cập nhật
@@ -269,6 +326,7 @@ async def update_tour_package(
         
     Example:
         PUT /api/v1/tour-packages/123e4567-e89b-12d3-a456-426614174000
+        Content-Type: application/json
         Body:
         {
             "price": 2800000,
@@ -286,6 +344,9 @@ async def update_tour_package(
         if 'end_date' in update_data and update_data['end_date']:
             update_data['end_date'] = update_data['end_date'].isoformat()
         
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No data provided for update")
+        
         result = await service.update_package(str(package_id), update_data)
         
         if result["EC"] == 1:
@@ -299,6 +360,105 @@ async def update_tour_package(
         raise
     except Exception as e:
         logger.error(f"Error in update_tour_package endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{package_id}/images")
+async def manage_tour_images(
+    package_id: UUID,
+    images: List[UploadFile] = File(..., description="Tour images (max 10 ảnh, định dạng: JPEG/JPG/PNG/WebP)"),
+    replace_existing: bool = Query(False, description="True = thay thế ảnh cũ, False = thêm vào ảnh hiện có"),
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Upload/quản lý ảnh cho tour package
+    
+    Args:
+        package_id: UUID của tour package
+        images: Danh sách file ảnh cần upload
+        replace_existing: True = thay thế ảnh cũ, False = thêm vào ảnh hiện có
+        service: Tour package service instance
+        
+    Returns:
+        Dict với danh sách URL ảnh
+        
+    Example:
+        POST /api/v1/tour-packages/123e4567-e89b-12d3-a456-426614174000/images?replace_existing=false
+        Content-Type: multipart/form-data
+        Files: [image1.jpg, image2.jpg]
+    """
+    try:
+        # Get existing package
+        package_result = await service.get_package_by_id(str(package_id))
+        if package_result["EC"] != 0:
+            raise HTTPException(status_code=404, detail="Tour package not found")
+        
+        existing_package = package_result["package"]
+        
+        # Validate max 10 images total
+        existing_image_count = 0
+        if not replace_existing and existing_package.get("image_urls"):
+            existing_image_count = len(existing_package["image_urls"].split("|"))
+        
+        total_images = existing_image_count + len(images)
+        if total_images > 10:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum 10 images allowed. Current: {existing_image_count}, Uploading: {len(images)}"
+            )
+        
+        # Validate image types
+        allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+        for image in images:
+            if image.content_type not in allowed_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid file type: {image.content_type}. Allowed: jpeg, jpg, png, webp"
+                )
+        
+        # Upload new images
+        logger.info(f"Uploading {len(images)} images to Cloudinary...")
+        new_image_urls = await service.upload_images(images)
+        
+        if not new_image_urls:
+            raise HTTPException(status_code=500, detail="Failed to upload images")
+        
+        # Prepare final image_urls
+        if replace_existing:
+            # Delete old images from Cloudinary
+            if existing_package.get("image_urls"):
+                await service.delete_images_from_urls(existing_package["image_urls"])
+            final_image_urls = "|".join(new_image_urls)
+        else:
+            # Append to existing
+            existing_urls = existing_package.get("image_urls", "")
+            if existing_urls:
+                final_image_urls = existing_urls + "|" + "|".join(new_image_urls)
+            else:
+                final_image_urls = "|".join(new_image_urls)
+        
+        # Update package with new image_urls
+        update_result = await service.update_package(
+            str(package_id),
+            {"image_urls": final_image_urls}
+        )
+        
+        if update_result["EC"] != 0:
+            # Rollback: Delete newly uploaded images
+            await service.delete_images_from_urls("|".join(new_image_urls))
+            raise HTTPException(status_code=500, detail="Failed to update package with new images")
+        
+        return {
+            "EC": 0,
+            "EM": "Images uploaded successfully",
+            "image_urls": final_image_urls.split("|"),
+            "total_images": len(final_image_urls.split("|"))
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error managing tour images: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

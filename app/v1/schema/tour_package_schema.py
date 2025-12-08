@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import date, datetime
 from uuid import UUID
+from fastapi import UploadFile
 
 
 class TourPackageBase(BaseModel):

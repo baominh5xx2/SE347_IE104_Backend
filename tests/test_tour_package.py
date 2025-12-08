@@ -423,9 +423,14 @@ async def test_update_package_success(tour_service, sample_tour_response):
             with patch.object(service, '_upsert_embedding', return_value=True):
                 # Mock update response
                 updated_response = {**sample_tour_response, **update_data}
-                mock_execute = Mock()
-                mock_execute.data = [updated_response]
-                mock_table.update.return_value.eq.return_value.execute.return_value = mock_execute
+                mock_update_execute = Mock()
+                mock_update_execute.data = [updated_response]
+                mock_table.update.return_value.eq.return_value.execute.return_value = mock_update_execute
+                
+                # Mock select to fetch full record after update
+                mock_select_execute = Mock()
+                mock_select_execute.data = updated_response
+                mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = mock_select_execute
                 
                 # Execute
                 result = await service.update_package(package_id, update_data)
@@ -509,9 +514,14 @@ async def test_update_package_partial_update(tour_service, sample_tour_response)
             with patch.object(service, '_upsert_embedding', return_value=True):
                 # Mock update response
                 updated_response = {**sample_tour_response, **update_data}
-                mock_execute = Mock()
-                mock_execute.data = [updated_response]
-                mock_table.update.return_value.eq.return_value.execute.return_value = mock_execute
+                mock_update_execute = Mock()
+                mock_update_execute.data = [updated_response]
+                mock_table.update.return_value.eq.return_value.execute.return_value = mock_update_execute
+                
+                # Mock select to fetch full record after update
+                mock_select_execute = Mock()
+                mock_select_execute.data = updated_response
+                mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = mock_select_execute
                 
                 # Execute
                 result = await service.update_package(package_id, update_data)
@@ -808,9 +818,14 @@ async def test_update_package_change_active_status(tour_service, sample_tour_res
     }):
         # Mock update response
         updated_response = {**sample_tour_response, "is_active": False}
-        mock_execute = Mock()
-        mock_execute.data = [updated_response]
-        mock_table.update.return_value.eq.return_value.execute.return_value = mock_execute
+        mock_update_execute = Mock()
+        mock_update_execute.data = [updated_response]
+        mock_table.update.return_value.eq.return_value.execute.return_value = mock_update_execute
+        
+        # Mock select to fetch full record after update
+        mock_select_execute = Mock()
+        mock_select_execute.data = updated_response
+        mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = mock_select_execute
         
         # Execute
         result = await service.update_package(package_id, {"is_active": False})
@@ -950,9 +965,14 @@ async def test_update_package_dates(tour_service, sample_tour_response):
             "start_date": "2025-01-15",
             "end_date": "2025-01-17"
         }
-        mock_execute = Mock()
-        mock_execute.data = [updated_response]
-        mock_table.update.return_value.eq.return_value.execute.return_value = mock_execute
+        mock_update_execute = Mock()
+        mock_update_execute.data = [updated_response]
+        mock_table.update.return_value.eq.return_value.execute.return_value = mock_update_execute
+        
+        # Mock select to fetch full record after update
+        mock_select_execute = Mock()
+        mock_select_execute.data = updated_response
+        mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = mock_select_execute
         
         # Execute
         result = await service.update_package(package_id, {
