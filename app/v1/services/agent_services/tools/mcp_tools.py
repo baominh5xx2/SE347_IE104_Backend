@@ -23,7 +23,9 @@ from app.v1.schema.shema_tool_mcp import (
 from app.v1.mcp.src.schema import (
     GetUserBookingsInput,
     UpdateBookingInput,
-    DeleteBookingInput
+    DeleteBookingInput,
+    VerifyOTPInput,
+    CreatePaymentInput
 )
 
 logger = logging.getLogger(__name__)
@@ -144,7 +146,8 @@ class BookingToolHandler:
     
     def create_booking(
         self, 
-        user_phone: str, 
+        user_phone: str,
+        user_email: str,
         package_id: str, 
         number_of_people: int, 
         special_requests: str = "", 
@@ -154,6 +157,7 @@ class BookingToolHandler:
         try:
             params = {
                 "user_phone": user_phone,
+                "user_email": user_email,
                 "package_id": package_id,
                 "number_of_people": number_of_people
             }
@@ -241,6 +245,48 @@ class BookingToolHandler:
         except Exception as e:
             logger.error(f"Error in delete_booking: {e}")
             return {"success": False, "error": f"Failed to delete booking: {str(e)}"}
+        
+        if result is None:
+            return {"success": False, "error": "No response from MCP server"}
+        
+        return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
+    
+    def verify_otp_and_confirm_booking(self, booking_id: str, otp_code: str) -> Dict[str, Any]:
+        """Verify OTP code and confirm booking"""
+        try:
+            params = {
+                "booking_id": booking_id,
+                "otp_code": otp_code
+            }
+            
+            result = self.mcp_client.call_tool_sync("verify_otp_and_confirm_booking", params)
+        except concurrent.futures.TimeoutError:
+            logger.error("verify_otp_and_confirm_booking timeout")
+            return {"success": False, "error": "Request timeout"}
+        except Exception as e:
+            logger.error(f"Error in verify_otp_and_confirm_booking: {e}")
+            return {"success": False, "error": f"Failed to verify OTP: {str(e)}"}
+        
+        if result is None:
+            return {"success": False, "error": "No response from MCP server"}
+        
+        return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
+    
+    def create_payment(self, booking_id: str, payment_method: str = "vnpay") -> Dict[str, Any]:
+        """Create payment và generate VNPay URL"""
+        try:
+            params = {
+                "booking_id": booking_id,
+                "payment_method": payment_method
+            }
+            
+            result = self.mcp_client.call_tool_sync("create_payment", params)
+        except concurrent.futures.TimeoutError:
+            logger.error("create_payment timeout")
+            return {"success": False, "error": "Request timeout"}
+        except Exception as e:
+            logger.error(f"Error in create_payment: {e}")
+            return {"success": False, "error": f"Failed to create payment: {str(e)}"}
         
         if result is None:
             return {"success": False, "error": "No response from MCP server"}
@@ -384,6 +430,33 @@ class UIToolHandler:
             return {"error": f"Failed to generate UI: {str(e)}"}
         
         return result if result else {"error": "No response from MCP server"}
+    
+    def generate_payment_ui(
+        self,
+        payment_url: str,
+        booking_id: str,
+        total_amount: float,
+        tour_name: str,
+        payment_method: str = "vnpay"
+    ) -> Dict[str, Any]:
+        """Generate payment button UI component"""
+        try:
+            params = {
+                "payment_url": payment_url,
+                "booking_id": booking_id,
+                "total_amount": total_amount,
+                "tour_name": tour_name,
+                "payment_method": payment_method
+            }
+            result = self.mcp_client.call_tool_sync("generate_payment_ui", params)
+        except concurrent.futures.TimeoutError:
+            logger.error("generate_payment_ui timeout")
+            return {"success": False, "error": "Request timeout"}
+        except Exception as e:
+            logger.error(f"Error in generate_payment_ui: {e}")
+            return {"success": False, "error": f"Failed to generate payment UI: {str(e)}"}
+        
+        return result if result else {"success": False, "error": "No response from MCP server"}
 
 
 class RecommendationToolHandler:
@@ -435,7 +508,7 @@ class MCPToolFactory:
         return StructuredTool.from_function(
             func=self.booking_handler.create_booking,
             name="create_booking",
-            description="Tạo booking mới cho user - YÊU CẦU THU THẬP ĐẦY ĐỦ THÔNG TIN TRƯỚC KHI GỌI (user_phone, package_id, number_of_people)",
+            description="Tạo booking mới cho user - YÊU CẦU THU THẬP ĐẦY ĐỦ THÔNG TIN TRƯỚC KHI GỌI (user_phone, user_email, package_id, number_of_people). Hệ thống sẽ gửi mã OTP về email để xác nhận.",
             args_schema=CreateBookingInput
         )
     
@@ -464,6 +537,24 @@ class MCPToolFactory:
             name="delete_booking",
             description="Hủy (cancel) booking và trả lại slot cho tour. Dữ liệu booking được giữ lại với trạng thái 'cancelled' (soft delete).",
             args_schema=DeleteBookingInput
+        )
+    
+    def verify_otp_and_confirm_booking_tool(self) -> StructuredTool:
+        """Create StructuredTool for verify_otp_and_confirm_booking"""
+        return StructuredTool.from_function(
+            func=self.booking_handler.verify_otp_and_confirm_booking,
+            name="verify_otp_and_confirm_booking",
+            description="Xác thực mã OTP và xác nhận booking. Gọi tool này khi user cung cấp mã OTP 6 số từ email. Sau khi verify thành công, booking sẽ được chuyển sang trạng thái 'confirmed'.",
+            args_schema=VerifyOTPInput
+        )
+    
+    def create_payment_tool(self) -> StructuredTool:
+        """Create StructuredTool for create_payment"""
+        return StructuredTool.from_function(
+            func=self.booking_handler.create_payment,
+            name="create_payment",
+            description="Tạo payment request và generate VNPay URL cho booking đã được xác nhận. Gọi tool này sau khi verify OTP thành công để tạo link thanh toán. Tool sẽ trả về payment_url để user có thể thanh toán.",
+            args_schema=CreatePaymentInput
         )
     
     # Search Tools
@@ -525,6 +616,22 @@ class MCPToolFactory:
             name="generate_tour_ui",
             description="Generate beautiful interactive UI component displaying tour packages in a responsive grid. Use this after getting tour recommendations to show them visually with images, prices, and booking buttons.",
             args_schema=GenerateTourUIInput
+        )
+    
+    def generate_payment_ui_tool(self) -> StructuredTool:
+        """Create StructuredTool for generate_payment_ui"""
+        class GeneratePaymentUIInput(BaseModel):
+            payment_url: str = Field(..., description="VNPay payment URL to redirect user")
+            booking_id: str = Field(..., description="Booking ID for this payment")
+            total_amount: float = Field(..., ge=0, description="Total amount to pay in VND")
+            tour_name: str = Field(..., description="Tour package name")
+            payment_method: str = Field(default="vnpay", description="Payment method")
+        
+        return StructuredTool.from_function(
+            func=self.ui_handler.generate_payment_ui,
+            name="generate_payment_ui",
+            description="Generate payment button UI component for user to click and pay. Call this tool after create_payment succeeds to show payment button to user. The button will redirect user to VNPay payment page.",
+            args_schema=GeneratePaymentUIInput
         )
     
     # Recommendation Tools
@@ -592,6 +699,12 @@ def update_booking_tool() -> StructuredTool:
 def delete_booking_tool() -> StructuredTool:
     return _tool_factory.delete_booking_tool()
 
+def verify_otp_and_confirm_booking_tool() -> StructuredTool:
+    return _tool_factory.verify_otp_and_confirm_booking_tool()
+
+def create_payment_tool() -> StructuredTool:
+    return _tool_factory.create_payment_tool()
+
 def search_tour_packages_tool() -> StructuredTool:
     return _tool_factory.search_tour_packages_tool()
 
@@ -609,6 +722,9 @@ def get_weather_forecast_tool() -> StructuredTool:
 
 def generate_tour_ui_tool() -> StructuredTool:
     return _tool_factory.generate_tour_ui_tool()
+
+def generate_payment_ui_tool() -> StructuredTool:
+    return _tool_factory.generate_payment_ui_tool()
 
 def request_recommendation_tool() -> StructuredTool:
     return _tool_factory.request_recommendation_tool()

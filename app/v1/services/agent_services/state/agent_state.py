@@ -28,5 +28,9 @@ class AgentState(MessagesState):
     recommended_package_ids: List[str]
     tour_packages: List[Dict[str, Any]]  # Full tour package objects for API response
     
+    # OTP & Booking tracking
+    user_email: Optional[str]  # Email của user để gửi OTP
+    pending_booking_id: Optional[str]  # Booking ID đang chờ verify OTP
+    
     # Final output
     final_response: str

@@ -1,0 +1,50 @@
+name: Deploy to AWS Lightsail
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  deploy:
+    name: Deploy Backend to Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to AWS Lightsail via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            # Define project variables
+            PROJECT_DIR="$HOME/doan"
+            REPO_URL="https://github.com/${{ github.repository }}.git"
+            
+            echo "=== Starting deployment ==="
+            
+            # Check if project directory exists
+            if [ ! -d "$PROJECT_DIR" ]; then
+              echo "Project directory not found. Cloning repository..."
+              git clone "$REPO_URL" "$PROJECT_DIR"
+              cd "$PROJECT_DIR"
+            else
+              echo "Project directory exists. Updating code..."
+              cd "$PROJECT_DIR"
+              git pull origin develop
+            fi
+            
+            echo "=== Stopping existing containers ==="
+            docker compose down
+            
+            echo "=== Building and starting containers ==="
+            docker compose up -d --build
+            
+            echo "=== Cleaning up old Docker images ==="
+            docker system prune -f
+            
+            echo "=== Checking container status ==="
+            docker compose ps
+            
+            echo "=== Deployment completed successfully ==="
