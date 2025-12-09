@@ -4,6 +4,7 @@ Professional FastMCP implementation with modular architecture
 """
 import os
 import asyncio
+import threading
 from fastmcp import FastMCP
 from src.core.config import settings
 from src.tools.weather_tools import register_weather_tools
@@ -45,37 +46,80 @@ async def compose_servers():
     await mcp.import_server(booking_server)
     await mcp.import_server(search_server)
 
-# Run composition once at import time, handling already-running loops safely
-def compose_servers_sync():
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If an event loop is already running (e.g., inside uvicorn),
-            # use a dedicated new loop to avoid RuntimeError.
+# Lazy initialization flag with thread lock
+_servers_composed = False
+_composition_lock = threading.Lock()
+
+def ensure_servers_composed():
+    """Ensure servers are composed, using thread-safe approach"""
+    global _servers_composed
+    if _servers_composed:
+        return
+    
+    with _composition_lock:
+        # Double-check after acquiring lock
+        if _servers_composed:
+            return
+        
+        import threading
+        
+        # Use a separate thread to run the async composition
+        # This avoids conflicts with uvicorn's event loop
+        def run_in_thread():
             new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
             try:
-                asyncio.set_event_loop(new_loop)
                 new_loop.run_until_complete(compose_servers())
             finally:
                 new_loop.close()
-                asyncio.set_event_loop(loop)
-        else:
-            loop.run_until_complete(compose_servers())
-    except RuntimeError:
-        # Fallback: run in a fresh loop
-        tmp_loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(tmp_loop)
-            tmp_loop.run_until_complete(compose_servers())
-        finally:
-            tmp_loop.close()
-            asyncio.set_event_loop(None)
+        
+        thread = threading.Thread(target=run_in_thread, daemon=False)
+        thread.start()
+        thread.join(timeout=10.0)  # Wait max 10 seconds
+        
+        if thread.is_alive():
+            raise RuntimeError("Server composition timed out")
+        
+        _servers_composed = True
 
-compose_servers_sync()
+# Compose servers lazily - only when needed
+# This will be called when mcp.http_app() is accessed or when server is used
+try:
+    # Try to compose immediately if no event loop is running
+    loop = asyncio.get_event_loop()
+    if not loop.is_running():
+        loop.run_until_complete(compose_servers())
+        _servers_composed = True
+    else:
+        # Event loop is running, defer to lazy initialization
+        pass
+except RuntimeError:
+    # No event loop exists, create one
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(compose_servers())
+        _servers_composed = True
+    finally:
+        loop.close()
+except Exception:
+    # If anything fails, defer to lazy initialization
+    pass
 
 # Register resources and prompts to main server (or organize similarly if needed)
 register_all_resources(mcp)
 register_all_prompts(mcp)
+
+# Wrap http_app to ensure composition before use
+_original_http_app = mcp.http_app
+
+def http_app(path: str = ""):
+    """Wrapper to ensure servers are composed before creating http app"""
+    ensure_servers_composed()
+    return _original_http_app(path)
+
+# Monkey patch to use our wrapper
+mcp.http_app = http_app
 
 if __name__ == "__main__":
     # Get port from env or default to 8001
