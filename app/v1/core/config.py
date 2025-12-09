@@ -1,6 +1,7 @@
 """
 Application Configuration
 """
+import os
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import List, Union
@@ -100,6 +101,20 @@ class Settings(BaseSettings):
     SENDGRID_API_KEY: str = ""  # SendGrid API key
     SENDGRID_FROM_EMAIL: str = "noreply@yourdomain.com"  # Email gửi đi
     
+    @field_validator('OPENAI_API_KEY', mode='before')
+    @classmethod
+    def prefer_exported_openai_key(cls, v):
+        """
+        Allow overriding OpenAI key via exported env (e.g., OPENAI_API_KEY or OPENAI_API_KEY_EXPORT).
+        Falls back to value provided (e.g., from .env) if no exported key is present.
+        """
+        if v:
+            return v
+        alt = os.getenv("OPENAI_API_KEY_EXPORT") or os.getenv("OPENAI_API_KEY")
+        if alt:
+            return alt
+        raise ValueError("OPENAI_API_KEY is required (set OPENAI_API_KEY or OPENAI_API_KEY_EXPORT)")
+
     class Config:
         env_file = ".env"
         case_sensitive = True
