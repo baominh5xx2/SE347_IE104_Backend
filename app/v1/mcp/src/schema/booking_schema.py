@@ -10,7 +10,13 @@ class CreateBookingInput(BaseModel):
     """Input schema for create_booking tool"""
     user_phone: str = Field(..., description="User phone number (Vietnamese format, e.g., '0901234567')")
     user_email: str = Field(..., description="User email to send OTP")
-    package_id: str = Field(..., description="Tour package UUID (must be exactly as returned from search_tour_packages)")
+    package_id: str = Field(
+        ...,
+        description=(
+            "Tour package UUID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). "
+            "Use EXACT package_id from the internal context message; never invent IDs like 'pkg_1' or 'tour_1'."
+        )
+    )
     number_of_people: int = Field(..., ge=1, le=50, description="Number of people (1-50)")
     special_requests: Optional[str] = Field(default="", description="Special requests or dietary restrictions")
     user_id: Optional[str] = Field(None, description="User ID if available (for authenticated users)")
@@ -44,3 +50,7 @@ class CreatePaymentInput(BaseModel):
     """Input schema for create_payment tool"""
     booking_id: str = Field(..., description="UUID của booking cần thanh toán")
     payment_method: str = Field(default="vnpay", description="Phương thức thanh toán (vnpay)")
+    return_url: Optional[str] = Field(
+        default=None,
+        description="Optional: URL frontend sẽ quay về sau thanh toán (append vào VNPAY_RETURN_URL)"
+    )

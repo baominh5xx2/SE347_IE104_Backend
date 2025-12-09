@@ -24,11 +24,18 @@ class OTPService:
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,
                 db=settings.REDIS_DB,
-                decode_responses=True
+                decode_responses=True,
+                socket_connect_timeout=2,  # 2 seconds timeout
+                socket_timeout=2,
+                retry_on_timeout=False
             )
             # Test connection
             self.redis_client.ping()
             logger.info("Redis connection established for OTP service")
+        except redis.ConnectionError as e:
+            logger.warning(f"Redis not available at {settings.REDIS_HOST}:{settings.REDIS_PORT}. OTP features will be limited. Error: {str(e)}")
+            logger.warning("To enable Redis: Install and start Redis server, or use Docker: docker run -d -p 6379:6379 redis:alpine")
+            self.redis_client = None
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {str(e)}")
             self.redis_client = None

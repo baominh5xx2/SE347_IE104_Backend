@@ -647,7 +647,11 @@ def register_booking_tools(mcp: FastMCP):
     logger.info("✅ Booking tools registered (including payment tools)")
 
 
-async def _create_payment_impl(booking_id: str, payment_method: str = "vnpay") -> Dict[str, Any]:
+async def _create_payment_impl(
+    booking_id: str,
+    payment_method: str = "vnpay",
+    client_return_url: Optional[str] = None
+) -> Dict[str, Any]:
     """Create payment và generate VNPay URL"""
     try:
         supabase = get_supabase_client()
@@ -661,7 +665,8 @@ async def _create_payment_impl(booking_id: str, payment_method: str = "vnpay") -
         result = await payment_service.create_payment(
             booking_id=booking_id,
             payment_method=payment_method,
-            ip_addr=ip_addr
+            ip_addr=ip_addr,
+            client_return_url=client_return_url
         )
         
         if result["EC"] != 0:
@@ -723,12 +728,22 @@ async def _generate_payment_ui_impl(
 ) -> Dict[str, Any]:
     """Generate payment button UI component"""
     try:
+        # Normalize types to avoid frontend type errors
+        safe_payment_url = str(payment_url or "")
+        safe_booking_id = str(booking_id or "")
+        try:
+            safe_total_amount = float(total_amount)
+        except (TypeError, ValueError):
+            safe_total_amount = 0.0
+        safe_tour_name = str(tour_name or "")
+        safe_payment_method = str(payment_method or "vnpay")
+        
         html = generate_payment_button_html(
-            payment_url=payment_url,
-            booking_id=booking_id,
-            total_amount=total_amount,
-            tour_name=tour_name,
-            payment_method=payment_method
+            payment_url=safe_payment_url,
+            booking_id=safe_booking_id,
+            total_amount=safe_total_amount,
+            tour_name=safe_tour_name,
+            payment_method=safe_payment_method
         )
         
         return {
@@ -739,10 +754,11 @@ async def _generate_payment_ui_impl(
                 "mimeType": "text/html",
                 "type": "payment_button",
                 "metadata": {
-                    "booking_id": booking_id,
-                    "total_amount": total_amount,
-                    "tour_name": tour_name,
-                    "payment_method": payment_method
+                    "booking_id": safe_booking_id,
+                    "total_amount": safe_total_amount,
+                    "tour_name": safe_tour_name,
+                    "payment_method": safe_payment_method,
+                    "payment_url": safe_payment_url
                 }
             }
         }

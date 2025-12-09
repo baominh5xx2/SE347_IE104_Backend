@@ -3,6 +3,7 @@ AI Assistant MCP Server
 Professional FastMCP implementation with modular architecture
 """
 import os
+import asyncio
 from fastmcp import FastMCP
 from src.core.config import settings
 from src.tools.weather_tools import register_weather_tools
@@ -37,11 +38,15 @@ register_booking_tools(booking_server)
 register_search_personalization_tools(search_server)
 register_tour_search_tools(search_server)
 
-# Mount sub-servers to main server
-mcp.mount(weather_server)
-mcp.mount(flight_server)
-mcp.mount(booking_server)
-mcp.mount(search_server)
+# Import sub-servers into main (static composition, no prefixes to keep original tool names)
+async def compose_servers():
+    await mcp.import_server(weather_server)
+    await mcp.import_server(flight_server)
+    await mcp.import_server(booking_server)
+    await mcp.import_server(search_server)
+
+# Run composition once at import time
+asyncio.run(compose_servers())
 
 # Register resources and prompts to main server (or organize similarly if needed)
 register_all_resources(mcp)

@@ -34,7 +34,8 @@ class VNPayService:
         order_info: str,
         ip_addr: str = "127.0.0.1",
         locale: str = "vn",
-        bank_code: Optional[str] = None
+        bank_code: Optional[str] = None,
+        client_return_url: Optional[str] = None
     ) -> str:
         """Tạo URL thanh toán VNPay"""
         
@@ -61,7 +62,14 @@ class VNPayService:
         requestData['vnp_OrderInfo'] = clean_order_info
         requestData['vnp_OrderType'] = 'other'
         requestData['vnp_Locale'] = locale
-        requestData['vnp_ReturnUrl'] = self.return_url
+        
+        # Cho phép FE truyền return_url để quay lại trang trước khi thanh toán
+        final_return_url = self.return_url
+        if client_return_url:
+            # append redirect param
+            connector = "&" if "?" in final_return_url else "?"
+            final_return_url = f"{final_return_url}{connector}redirect={urllib.parse.quote_plus(client_return_url)}"
+        requestData['vnp_ReturnUrl'] = final_return_url
         requestData['vnp_IpAddr'] = ip_addr
         requestData['vnp_CreateDate'] = create_date
         # KHÔNG CÓ vnp_ExpireDate - khớp với URL mẫu và Python demo

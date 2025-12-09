@@ -361,6 +361,7 @@ def generate_payment_button_html(
                 class="mcp-payment-button"
                 data-payment-url="{safe_payment_url}"
                 data-booking-id="{safe_booking_id}"
+                id="payment-btn-{safe_booking_id}"
                 style="
                     width: 100%;
                     padding: 14px 24px;
@@ -377,9 +378,8 @@ def generate_payment_button_html(
                     align-items: center;
                     justify-content: center;
                     gap: 8px;
+                    position: relative;
                 "
-                onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0, 0, 0, 0.15)';"
-                onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0, 0, 0, 0.1)';"
             >
                 <span>💳</span>
                 <span>Thanh toán ngay qua VNPay</span>
@@ -394,6 +394,47 @@ def generate_payment_button_html(
         </div>
     </div>
     
+    <style>
+        @keyframes spin {{
+            0% {{ transform: rotate(0deg); }}
+            100% {{ transform: rotate(360deg); }}
+        }}
+        .mcp-payment-button:hover:not(:disabled) {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }}
+        .mcp-payment-button:disabled {{
+            cursor: not-allowed;
+            opacity: 0.7;
+        }}
+    </style>
+    
+    <script>
+        (function() {{
+            const btn = document.getElementById('payment-btn-{safe_booking_id}');
+            if (!btn) return;
+            
+            const paymentUrl = btn.getAttribute('data-payment-url');
+            
+            btn.addEventListener('click', function(e) {{
+                e.preventDefault();
+                if (btn.disabled) return false;
+                
+                // Disable button ngay lập tức
+                btn.disabled = true;
+                
+                // Hiển thị loading
+                btn.innerHTML = '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid #667eea; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;"></span><span>Đang chuyển hướng...</span>';
+                
+                // Redirect sau 100ms
+                setTimeout(function() {{
+                    window.location.href = paymentUrl;
+                }}, 100);
+                
+                return false;
+            }});
+        }})();
+    </script>
     """
     
     return html
