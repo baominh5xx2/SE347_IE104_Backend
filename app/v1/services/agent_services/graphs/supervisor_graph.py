@@ -246,9 +246,9 @@ class SupervisorGraph:
             loaded = await self._load_history_from_supabase(conversation_id, user_id, limit=50)
             if loaded:
                 history_messages = loaded
-
-        if history_messages:
-            initial_state["messages"] = history_messages + initial_state["messages"]
+            
+            if history_messages:
+                initial_state["messages"] = history_messages + initial_state["messages"]
         
         # Invoke graph
         try:
@@ -338,9 +338,9 @@ class SupervisorGraph:
             loaded = await self._load_history_from_supabase(conversation_id, user_id, limit=50)
             if loaded:
                 history_messages = loaded
-
-        if history_messages:
-            initial_state["messages"] = history_messages + initial_state["messages"]
+            
+            if history_messages:
+                initial_state["messages"] = history_messages + initial_state["messages"]
         
         # Stream graph execution
         config = {
