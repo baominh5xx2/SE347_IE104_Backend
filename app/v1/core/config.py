@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     VNPAY_HASH_SECRET: str = ""  # Secret key from VNPay
     VNPAY_URL: str = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"  # VNPay payment URL
     VNPAY_RETURN_URL: str = "http://localhost:8000/api/v1/payments/vnpay/return"  # Return URL after payment
+    FRONTEND_BASE_URL: str = "http://localhost:3000"  # Frontend URL to redirect after payment
     
     # OTP & Email Configuration
     OTP_EXPIRE_MINUTES: int = 5  # OTP hết hạn sau 5 phút

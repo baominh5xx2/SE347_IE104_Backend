@@ -2,7 +2,7 @@
 Recommendation Agent Nodes
 Node functions for Recommendation Agent
 """
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 import logging
 from app.v1.services.agent_services.state import AgentState
 from app.v1.services.agent_services.agents import recommendation_agent
@@ -69,6 +69,24 @@ class RecommendationAgentNodes:
                 
                 # Store full tour packages in state for API response
                 state["tour_packages"] = packages[:5]
+                
+                # Inject internal mapping context so LLM knows the exact package_id to use
+                tour_mapping = []
+                for i, pkg in enumerate(packages[:5], 1):
+                    tour_mapping.append(
+                        f"{i}. {pkg.get('package_name')} ({pkg.get('destination')}) -> package_id: {pkg.get('package_id')}"
+                    )
+                
+                context_message = SystemMessage(
+                    content=(
+                        "[INTERNAL CONTEXT - DO NOT SHOW TO USER]\n"
+                        "Available tours for booking (use exact package_id when calling create_booking):\n"
+                        f"{chr(10).join(tour_mapping)}\n\n"
+                        "When user selects a tour by number (e.g. \"tour 1\", \"số 1\") or name (e.g. \"Đà Lạt\"), "
+                        "use the corresponding package_id from above. NEVER invent package_id like \"pkg_1\"."
+                    )
+                )
+                state["messages"] = state.get("messages", []) + [context_message]
                 
                 # Build detailed message with tour info (show top 5 tours)
                 tour_details = []

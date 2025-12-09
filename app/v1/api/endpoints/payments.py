@@ -19,6 +19,7 @@ from ...services.payment_service import PaymentService
 from ...services.vnpay_service import VNPayService
 from ...core.supabase import get_supabase_client
 from ...core.dependencies import get_current_user
+from ...core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +94,14 @@ async def create_payment(
             logger.warning(f"Access denied: booking user_id={booking_user_id}, current user_id={current_user_id}")
             raise HTTPException(status_code=403, detail="Access denied. You can only create payment for your own bookings.")
         
+        # Prefer return_url from payload; fallback to Referer header so user quay về trang trước khi thanh toán
+        client_return_url = payment.return_url or request.headers.get("referer")
+        
         result = await service.create_payment(
             booking_id=str(payment.booking_id),
             payment_method=payment.payment_method,
-            ip_addr=client_ip
+            ip_addr=client_ip,
+            client_return_url=client_return_url
         )
         
         if result["EC"] != 0:
@@ -204,8 +209,9 @@ async def vnpay_return(
             verify_result = vnpay_service.verify_payment_response(inputData)
             is_valid = verify_result['is_valid']
             
-            # Build redirect URL to frontend
-            frontend_base_url = "http://localhost:4200"  # Angular default port
+            # Build redirect URL to frontend (configurable). If redirect param is present, prefer it.
+            redirect_param = inputData.get("redirect")
+            frontend_base_url = redirect_param or settings.FRONTEND_BASE_URL or "http://localhost:3000"
             
             # Y CHANG code user: if vnp.validate_response(...)
             if is_valid:
@@ -226,18 +232,18 @@ async def vnpay_return(
             return RedirectResponse(url=redirect_url, status_code=303)
         else:
             # Y CHANG code user: else (không có inputData)
-            frontend_base_url = "http://localhost:4200"
+            frontend_base_url = inputData.get("redirect") or settings.FRONTEND_BASE_URL or "http://localhost:3000"
             redirect_url = f"{frontend_base_url}/payment/failed?result="
             return RedirectResponse(url=redirect_url, status_code=303)
         
     except KeyError as e:
         logger.error(f"VNPay return: Missing required field {str(e)}")
-        frontend_base_url = "http://localhost:4200"
+        frontend_base_url = inputData.get("redirect") or settings.FRONTEND_BASE_URL or "http://localhost:3000"
         redirect_url = f"{frontend_base_url}/payment/failed?error=missing_field&field={str(e)}"
         return RedirectResponse(url=redirect_url, status_code=303)
     except Exception as e:
         logger.error(f"Error in VNPay return: {str(e)}")
-        frontend_base_url = "http://localhost:4200"
+        frontend_base_url = inputData.get("redirect") or settings.FRONTEND_BASE_URL or "http://localhost:3000"
         redirect_url = f"{frontend_base_url}/payment/failed?error=unknown"
         return RedirectResponse(url=redirect_url, status_code=303)
 

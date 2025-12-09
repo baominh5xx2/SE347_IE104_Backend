@@ -145,6 +145,24 @@ class ChatAgentNodes:
                             tool_args["user_id"] = user_id
                             logger.info(f"✅ Auto-injected user_id '{user_id}' into get_user_bookings")
                         
+                        # Auto-inject payment data for generate_payment_ui from the latest create_payment result
+                        if tool_name == "generate_payment_ui":
+                            latest_payment = state.get("latest_payment", {})
+                            if isinstance(latest_payment, dict):
+                                if latest_payment.get("payment_url"):
+                                    tool_args["payment_url"] = latest_payment.get("payment_url")
+                                if latest_payment.get("booking_id"):
+                                    tool_args["booking_id"] = latest_payment.get("booking_id")
+                                if latest_payment.get("amount") is not None:
+                                    tool_args["total_amount"] = latest_payment.get("amount")
+                                booking_info = latest_payment.get("booking_info", {}) or {}
+                                tour_name = latest_payment.get("tour_name") or booking_info.get("tour_name")
+                                if tour_name:
+                                    tool_args["tour_name"] = tour_name
+                                if latest_payment.get("payment_method"):
+                                    tool_args["payment_method"] = latest_payment.get("payment_method")
+                                logger.info(f"✅ Auto-injected payment data into generate_payment_ui from latest create_payment")
+                        
                         # Auto-inject user_phone and user_id for create_booking tool
                         if tool_name == "create_booking":
                             # Inject user_phone if available and not provided
@@ -178,69 +196,22 @@ class ChatAgentNodes:
                                 else:
                                     logger.warning("⚠️ generate_tour_ui called but NO packages found in state!")
 
-                            # SMART ID RESOLUTION: Map index/number/hallucinated_id to real package_id
-                            # If package_id is a small number (e.g. "1", "2") or "tour 1", map it to real ID
+                            # Simple safety net: validate UUID, else fallback to first recommended package
                             if package_id and tour_packages:
-                                try:
                                     import re
+                                
                                     package_id_str = str(package_id)
-                                    
-                                    # Check if it's a valid UUID format (8-4-4-4-12 hex digits)
                                     uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
                                     is_valid_uuid = bool(uuid_pattern.match(package_id_str))
                                     
-                                    # If NOT a valid UUID, try to resolve it
                                     if not is_valid_uuid:
-                                        logger.warning(f"⚠️ Invalid UUID format detected: '{package_id}' - attempting resolution")
-                                        
-                                        # 1. Try index-based mapping (e.g. "1", "tour 1")
-                                        clean_id = package_id_str.lower().replace("tour", "").replace("số", "").replace("pkg", "").replace("package", "").strip()
-                                        # Extract any digits from the string
-                                        digits = re.findall(r'\d+', clean_id)
-                                        
-                                        if digits:
-                                            idx = int(digits[0]) - 1  # 1-based index to 0-based
-                                            if 0 <= idx < len(tour_packages):
-                                                real_package_id = tour_packages[idx].get("package_id")
-                                                if real_package_id:
-                                                    logger.info(f"🔄 Smart Resolution: Mapped '{package_id}' -> '{real_package_id}' (Index {idx + 1})")
-                                                    tool_args["package_id"] = real_package_id
-                                                    package_id = real_package_id
-                                                    is_valid_uuid = True  # Mark as resolved
-                                        
-                                        # 2. If still not resolved, try to match by name (partial match)
-                                        if not is_valid_uuid:
-                                            package_id_lower = package_id_str.lower()
-                                            for idx, pkg in enumerate(tour_packages):
-                                                pkg_name = str(pkg.get("package_name", "")).lower()
-                                                pkg_dest = str(pkg.get("destination", "")).lower()
-                                                # Check if package_id contains destination or package name keywords
-                                                if pkg_dest in package_id_lower or any(word in package_id_lower for word in pkg_name.split() if len(word) > 3):
-                                                    real_package_id = pkg.get("package_id")
-                                                    if real_package_id:
-                                                        logger.info(f"🔄 Smart Resolution: Mapped '{package_id}' -> '{real_package_id}' (Matched by name: {pkg.get('package_name')})")
-                                                        tool_args["package_id"] = real_package_id
-                                                        package_id = real_package_id
-                                                        is_valid_uuid = True
-                                                        break
-                                        
-                                        # 3. Ultimate fallback: Use the first package if available
-                                        if not is_valid_uuid and tour_packages:
-                                            real_package_id = tour_packages[0].get("package_id")
-                                            if real_package_id:
-                                                logger.warning(f"⚠️ Fallback: Mapped invalid '{package_id}' -> '{real_package_id}' (First available package)")
-                                                tool_args["package_id"] = real_package_id
-                                                package_id = real_package_id
-                                                
-                                except Exception as map_err:
-                                    logger.error(f"⚠️ Failed to map package_id '{package_id}': {map_err}")
-                                    # Last resort: use first package if available
-                                    if tour_packages:
                                         real_package_id = tour_packages[0].get("package_id")
                                         if real_package_id:
-                                            logger.warning(f"⚠️ Emergency fallback: Using first package '{real_package_id}'")
+                                            logger.warning(f"⚠️ Invalid package_id '{package_id}', using first available '{real_package_id}'")
                                             tool_args["package_id"] = real_package_id
                                             package_id = real_package_id
+                                    else:
+                                        logger.info(f"✅ Valid package_id '{package_id}' found")
 
                             # Just log warning if no recommendations, but allow booking to proceed
                             # MCP server will validate the package_id anyway
@@ -259,6 +230,12 @@ class ChatAgentNodes:
                                 tool_args,
                                 config={"callbacks": [agent_callback]}
                             )
+                            
+                            # Persist payment data for subsequent generate_payment_ui calls
+                            if tool_name == "create_payment" and isinstance(result, dict):
+                                if result.get("success"):
+                                    state["latest_payment"] = result
+                                    logger.info("✅ Stored latest payment data in state for payment UI generation")
                             
                             # === MCP-UI INTEGRATION ===
                             # Capture the UI Resource from the tool result

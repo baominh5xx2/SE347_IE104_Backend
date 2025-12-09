@@ -5,7 +5,7 @@ Main orchestration graph for multi-agent system
 """
 from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 import logging
 import os
@@ -27,6 +27,8 @@ from app.v1.services.agent_services.state import AgentState
 from app.v1.services.agent_services.nodes import ChatAgentNodes, RecommendationAgentNodes
 from app.v1.services.agent_services.config import agent_config
 from app.v1.core.logging_config import agent_callback
+from app.v1.services.chat_room_service import ChatRoomService
+from app.v1.core.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,62 @@ class SupervisorGraph:
         self.chat_nodes = ChatAgentNodes(self.llm)
         self.recommendation_nodes = RecommendationAgentNodes()
         self.graph = self._build_graph()
+
+        # Initialize ChatRoomService for loading history from Supabase
+        try:
+            supabase_client = get_supabase_client()
+            self.chat_room_service = ChatRoomService(supabase_client)
+            logger.info("✅ ChatRoomService initialized for SupervisorGraph")
+        except Exception as e:
+            self.chat_room_service = None
+            logger.error(f"❌ Failed to init ChatRoomService: {str(e)}")
+
+    async def _load_history_from_supabase(self, conversation_id: str, user_id: str, limit: int = 50) -> list[BaseMessage]:
+        """
+        Load chat history from Supabase for a conversation/user.
+
+        Only load when conversation_id is not default_conv to avoid accidental cross-user leakage.
+        """
+        history_messages: list[BaseMessage] = []
+
+        # Guard: service available and conversation_id valid
+        if not self.chat_room_service:
+            return history_messages
+        if not conversation_id or conversation_id == "default_conv":
+            return history_messages
+
+        try:
+            result = self.chat_room_service.get_room_messages(
+                room_id=conversation_id,
+                user_id=user_id,
+                limit=limit,
+                offset=0
+            )
+
+            if result.get("EC") != 0:
+                logger.warning(
+                    f"⚠️ Could not load history for room {conversation_id}: {result.get('EM')}"
+                )
+                return history_messages
+
+            db_messages = result.get("data") or []
+            for msg in db_messages:
+                role = msg.get("role")
+                content = msg.get("content", "")
+                if role == "user":
+                    history_messages.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    history_messages.append(AIMessage(content=content))
+
+            if history_messages:
+                logger.info(
+                    f"📥 Loaded {len(history_messages)} messages from Supabase for room {conversation_id}"
+                )
+
+        except Exception as e:
+            logger.error(f"❌ Error loading history from Supabase: {str(e)}")
+
+        return history_messages
     
     def _build_graph(self) -> StateGraph:
         """
@@ -169,9 +227,11 @@ class SupervisorGraph:
             final_response=""
         )
         
-        # Add conversation history if provided
+        # Add conversation history if provided, else load from Supabase when available
+        history_messages = []
+
+        # Prefer explicitly provided history
         if conversation_history:
-            history_messages = []
             for msg in conversation_history:
                 if isinstance(msg, dict):
                     role = msg.get("role", "")
@@ -179,10 +239,16 @@ class SupervisorGraph:
                     if role == "user":
                         history_messages.append(HumanMessage(content=content))
                     elif role == "assistant":
-                        history_messages.append(HumanMessage(content=content))
-            
-            if history_messages:
-                initial_state["messages"] = history_messages + initial_state["messages"]
+                        history_messages.append(AIMessage(content=content))
+
+        # Fallback: load history from Supabase if buffer empty
+        if not history_messages:
+            loaded = await self._load_history_from_supabase(conversation_id, user_id, limit=50)
+            if loaded:
+                history_messages = loaded
+
+        if history_messages:
+            initial_state["messages"] = history_messages + initial_state["messages"]
         
         # Invoke graph
         try:
@@ -253,9 +319,11 @@ class SupervisorGraph:
             final_response=""
         )
         
-        # Add conversation history if provided
+        # Add conversation history if provided, else load from Supabase when available
+        history_messages = []
+
+        # Prefer explicitly provided history
         if conversation_history:
-            history_messages = []
             for msg in conversation_history:
                 if isinstance(msg, dict):
                     role = msg.get("role", "")
@@ -263,10 +331,16 @@ class SupervisorGraph:
                     if role == "user":
                         history_messages.append(HumanMessage(content=content))
                     elif role == "assistant":
-                        history_messages.append(HumanMessage(content=content))
-            
-            if history_messages:
-                initial_state["messages"] = history_messages + initial_state["messages"]
+                        history_messages.append(AIMessage(content=content))
+
+        # Fallback: load history from Supabase if buffer empty
+        if not history_messages:
+            loaded = await self._load_history_from_supabase(conversation_id, user_id, limit=50)
+            if loaded:
+                history_messages = loaded
+
+        if history_messages:
+            initial_state["messages"] = history_messages + initial_state["messages"]
         
         # Stream graph execution
         config = {

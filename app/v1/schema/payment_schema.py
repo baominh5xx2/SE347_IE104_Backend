@@ -12,6 +12,10 @@ class PaymentCreate(BaseModel):
     """Schema for creating a new payment"""
     booking_id: UUID = Field(..., description="ID của booking cần thanh toán")
     payment_method: str = Field(default="vnpay", description="Phương thức thanh toán (vnpay)")
+    return_url: Optional[str] = Field(
+        default=None,
+        description="Optional: URL frontend muốn quay lại sau thanh toán. Sẽ được append vào VNPAY_RETURN_URL dưới dạng redirect param."
+    )
     
     model_config = ConfigDict(
         json_schema_extra={

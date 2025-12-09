@@ -29,7 +29,8 @@ class PaymentService:
         self,
         booking_id: str,
         payment_method: str = "vnpay",
-        ip_addr: str = "127.0.0.1"
+        ip_addr: str = "127.0.0.1",
+        client_return_url: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Tạo payment mới và generate VNPay URL
@@ -120,7 +121,8 @@ class PaymentService:
                 payment_id=payment_id,
                 amount=amount,
                 order_info=order_info,
-                ip_addr=ip_addr
+                ip_addr=ip_addr,
+                client_return_url=client_return_url
             )
             
             # 6. Return response with payment_url

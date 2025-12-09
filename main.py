@@ -55,21 +55,8 @@ app.add_middleware(
 # Mount MCP Server
 mcp_app = mcp_server.http_app(path="")
 
-# Re-create app with combined lifespan
-@asynccontextmanager
-async def combined_lifespan(app: FastAPI):
-    """Combined lifespan for both FastAPI and MCP"""
-    # Start FastAPI lifespan
-    async with lifespan(app):
-        # Start MCP lifespan
-        async with mcp_app.router.lifespan_context(app):
-            yield
-
-# Update app lifespan
-app.router.lifespan_context = combined_lifespan
-
-# Mount MCP at /mcp with empty internal path => endpoint is /mcp
-app.mount("/mcp", mcp_app)
+# Expose MCP endpoints at /mcp via router include (FastAPI will merge lifespans)
+app.include_router(mcp_app.router, prefix="/mcp")
 
 # Include API router at /api/v1
 app.include_router(api_router, prefix="/api/v1")
