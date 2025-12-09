@@ -45,8 +45,33 @@ async def compose_servers():
     await mcp.import_server(booking_server)
     await mcp.import_server(search_server)
 
-# Run composition once at import time
-asyncio.run(compose_servers())
+# Run composition once at import time, handling already-running loops safely
+def compose_servers_sync():
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If an event loop is already running (e.g., inside uvicorn),
+            # use a dedicated new loop to avoid RuntimeError.
+            new_loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(new_loop)
+                new_loop.run_until_complete(compose_servers())
+            finally:
+                new_loop.close()
+                asyncio.set_event_loop(loop)
+        else:
+            loop.run_until_complete(compose_servers())
+    except RuntimeError:
+        # Fallback: run in a fresh loop
+        tmp_loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(tmp_loop)
+            tmp_loop.run_until_complete(compose_servers())
+        finally:
+            tmp_loop.close()
+            asyncio.set_event_loop(None)
+
+compose_servers_sync()
 
 # Register resources and prompts to main server (or organize similarly if needed)
 register_all_resources(mcp)
