@@ -22,6 +22,10 @@ RUN uv pip install --system --no-cache-dir .
 # Copy toàn bộ code vào
 COPY . .
 
+# Runtime env (không set secrets ở build-time; override khi docker run/compose)
+ENV OPENAI_API_KEY=""
+ENV OPENAI_API_KEY_EXPORT=""
+
 # Tạo user để chạy cho an toàn (optional, nhưng tốt)
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
