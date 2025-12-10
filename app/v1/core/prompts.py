@@ -14,6 +14,7 @@ class PromptManager:
         self.config_path = Path(__file__).parent.parent.parent.parent / "agent.yaml"
         self.config = self._load_config()
         self.prompts = self._extract_prompts()
+        self.skill_metadata = self._load_skill_metadata()
     
     def _load_config(self) -> Dict[str, Any]:
         """Load agent.yaml configuration"""
@@ -67,9 +68,38 @@ class PromptManager:
         except KeyError as e:
             raise ValueError(f"Missing variable {e} for prompt formatting")
     
+    def _load_skill_metadata(self) -> list:
+        """Load skill metadata (Level 1 - Progressive Disclosure)"""
+        try:
+            from app.v1.services.agent_services.skills.skill_loader import get_skill_loader
+            loader = get_skill_loader()
+            return loader.load_all_skills()
+        except Exception as e:
+            print(f"Warning: Could not load skill metadata: {e}")
+            return []
+    
+    def get_skill_metadata_text(self) -> str:
+        """Format skill metadata for injection into system prompt"""
+        if not self.skill_metadata:
+            return ""
+        
+        skill_lines = []
+        for skill in self.skill_metadata:
+            skill_lines.append(f"- {skill['name']}: {skill['description']}")
+        
+        if skill_lines:
+            return "\n\nAvailable Skills:\n" + "\n".join(skill_lines)
+        return ""
+    
     def get_system_prompt(self, agent_name: str) -> str:
-        """Get system prompt for an agent"""
-        return self.get_prompt(agent_name, 'system')
+        """Get system prompt for an agent with skill metadata injected"""
+        base_prompt = self.get_prompt(agent_name, 'system')
+        skill_text = self.get_skill_metadata_text()
+        
+        if skill_text:
+            return base_prompt + skill_text
+        
+        return base_prompt
     
     def get_all_prompts(self, agent_name: str) -> Dict[str, str]:
         """Get all prompts for an agent"""

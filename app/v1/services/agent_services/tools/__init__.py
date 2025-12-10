@@ -18,7 +18,8 @@ from .mcp_tools import (
     get_weather_forecast_tool,
     search_mem0_episodes_tool,
     generate_tour_ui_tool,
-    generate_payment_ui_tool
+    generate_payment_ui_tool,
+    search_latest_tour_info_tool
 )
 
 __all__ = ["get_chat_tools"]
@@ -44,6 +45,7 @@ def get_chat_tools() -> List[StructuredTool]:
         get_current_temperature_tool(),
         get_weather_forecast_tool(),
         search_mem0_episodes_tool(),
-        generate_tour_ui_tool()
+        generate_tour_ui_tool(),
+        search_latest_tour_info_tool()
     ]
 

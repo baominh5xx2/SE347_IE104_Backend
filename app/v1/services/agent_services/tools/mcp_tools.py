@@ -11,6 +11,7 @@ import logging
 import json
 from fastmcp import Client
 from app.v1.core.config import settings
+from app.v1.services.agent_services.skills.skill_loader import get_skill_loader
 from app.v1.schema.shema_tool_mcp import (
     SearchTourPackagesInput,
     CreateBookingInput,
@@ -485,6 +486,66 @@ class RecommendationToolHandler:
         }
 
 
+class PerplexityToolHandler:
+    """Handler for Perplexity API tools (Tour Information Skill)"""
+    
+    def __init__(self):
+        """Initialize Perplexity Tool Handler"""
+        from app.v1.services.agent_services.skills.tour_information.perplexity_service import get_perplexity_service
+        self.perplexity_service = get_perplexity_service()
+        self.skill_loader = get_skill_loader()
+        self.skill_guidelines = self._get_skill_guidelines()
+    
+    def _get_skill_guidelines(self) -> Optional[str]:
+        """
+        Load full SKILL.md content for progressive disclosure (Level 2)
+        """
+        try:
+            content = self.skill_loader.load_skill_content("Tour Information Collector")
+            return content
+        except Exception as e:
+            logger.warning(f"Could not load skill guidelines: {e}")
+            return None
+    
+    async def search_latest_tour_info(self, destination: str) -> Dict[str, Any]:
+        """
+        Tìm thông tin tour mới nhất cho một địa điểm bằng Perplexity API
+        
+        Args:
+            destination: Tên địa điểm (ví dụ: "Đà Lạt", "Phú Quốc", "Hà Nội")
+            
+        Returns:
+            Dict với thông tin tour: destination, highlights, typical_prices, best_time, tips, sources
+        """
+        result = await self.perplexity_service.search_tour_info(destination)
+        if self.skill_guidelines:
+            result["skill_guidelines"] = self.skill_guidelines
+        return result
+    
+    def search_latest_tour_info_sync(self, destination: str) -> Dict[str, Any]:
+        """Synchronous wrapper for search_latest_tour_info"""
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is running, use run_until_complete in a new thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        lambda: asyncio.run(self.perplexity_service.search_tour_info(destination))
+                    )
+                    result = future.result(timeout=30)
+            else:
+                result = loop.run_until_complete(self.perplexity_service.search_tour_info(destination))
+        except RuntimeError:
+            # No event loop, create one
+            result = asyncio.run(self.perplexity_service.search_tour_info(destination))
+        
+        if self.skill_guidelines:
+            result["skill_guidelines"] = self.skill_guidelines
+        return result
+
+
 # ============================================================================
 # MCP TOOL FACTORY - Creates LangChain StructuredTools
 # ============================================================================
@@ -501,6 +562,7 @@ class MCPToolFactory:
         self.weather_handler = WeatherToolHandler(self.mcp_client)
         self.ui_handler = UIToolHandler(self.mcp_client)
         self.recommendation_handler = RecommendationToolHandler()
+        self.perplexity_handler = PerplexityToolHandler()
     
     # Booking Tools
     def create_booking_tool(self) -> StructuredTool:
@@ -643,6 +705,24 @@ class MCPToolFactory:
             description="Gọi Recommendation Agent để lấy tour recommendations. Sử dụng tool này khi user hỏi về tour, du lịch, địa điểm, hoặc muốn tìm tour packages. Chat Agent tự quyết định khi nào cần gọi tool này.",
             args_schema=RequestRecommendationInput
         )
+    
+    # Perplexity Tools (Tour Information Skill)
+    def search_latest_tour_info_tool(self) -> StructuredTool:
+        """Create StructuredTool for search_latest_tour_info"""
+        class SearchLatestTourInfoInput(BaseModel):
+            destination: str = Field(..., description="Tên địa điểm cần tìm thông tin tour (ví dụ: 'Đà Lạt', 'Phú Quốc', 'Hà Nội')")
+        
+        return StructuredTool.from_function(
+            func=self.perplexity_handler.search_latest_tour_info_sync,
+            name="search_latest_tour_info",
+            description=(
+                "Tìm thông tin tour mới nhất và cập nhật cho một địa điểm cụ thể bằng Perplexity API. "
+                "Sử dụng khi user hỏi về: thông tin tour mới nhất, xu hướng du lịch, điểm tham quan, giá cả, lưu ý du lịch cho địa điểm. "
+                "Output format (tuân theo SKILL.md): destination, highlights (list), typical_prices (string), best_time (string), tips (list), sources (list URLs). "
+                "Tool này trả về thông tin real-time từ internet, khác với request_recommendation (tìm trong database)."
+            ),
+            args_schema=SearchLatestTourInfoInput
+        )
 
 
 # ============================================================================
@@ -728,6 +808,9 @@ def generate_payment_ui_tool() -> StructuredTool:
 
 def request_recommendation_tool() -> StructuredTool:
     return _tool_factory.request_recommendation_tool()
+
+def search_latest_tour_info_tool() -> StructuredTool:
+    return _tool_factory.search_latest_tour_info_tool()
 
 # Legacy compatibility: Keep old call_mcp_tool function
 async def call_mcp_tool(tool_name: str, params: Dict[str, Any]) -> Any:
