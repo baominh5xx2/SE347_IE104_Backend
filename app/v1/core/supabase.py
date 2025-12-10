@@ -38,7 +38,8 @@ def check_schema_exists(supabase: Client) -> bool:
         'package_embeddings',
         'otp_verifications',
         'payments',
-        'chat_history'
+        'chat_history',
+        'travel_news_urls'
     ]
     
     try:

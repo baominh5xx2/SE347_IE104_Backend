@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     # OpenAI Configuration
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-5-mini"
+    # Perplexity Configuration
+    PERPLEXITY_API_KEY: str = ""
     OPENAI_ORGANIZATION: str = ""  # Optional: OpenAI organization ID for organization-level API access
 
     
@@ -101,6 +103,16 @@ class Settings(BaseSettings):
     SENDGRID_API_KEY: str = ""  # SendGrid API key
     SENDGRID_FROM_EMAIL: str = "noreply@yourdomain.com"  # Email gửi đi
     
+    # Travel News Configuration
+    TRAVEL_NEWS_SEARCH_QUERIES: List[str] = [
+        "tin tức du lịch mới nhất 2024",
+        "cẩm nang du lịch Việt Nam",
+        "destination hot trending",
+        "tour promotions deals",
+    ]  # Queries để search - sẽ search với detailed prompt ưu tiên trending & recent content
+    TRAVEL_NEWS_SCHEDULE_HOUR: int = 17  # Hour để chạy scheduled job (17 = 5 PM)
+    TRAVEL_NEWS_SCHEDULE_MINUTE: int = 0  # Minute để chạy scheduled job
+    
     @field_validator('OPENAI_API_KEY', mode='before')
     @classmethod
     def prefer_exported_openai_key(cls, v):
@@ -114,7 +126,16 @@ class Settings(BaseSettings):
         if alt:
             return alt
         raise ValueError("OPENAI_API_KEY is required (set OPENAI_API_KEY or OPENAI_API_KEY_EXPORT)")
-
+    
+    @field_validator('PERPLEXITY_API_KEY', mode='before')
+    @classmethod
+    def prefer_perplexity_key(cls, v):
+        """Allow PERPLEXITY_API_KEY from env, return empty if not set"""
+        if v:
+            return v
+        alt = os.getenv("PERPLEXITY_API_KEY")
+        return alt if alt else ""
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

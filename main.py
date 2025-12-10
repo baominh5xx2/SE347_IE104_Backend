@@ -31,7 +31,16 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
+    # Start scheduler on startup
+    from app.v1.services.scheduled_tasks import start_scheduler, shutdown_scheduler
+    start_scheduler()
+    logger.info("Application started, scheduler initialized")
+    
     yield
+    
+    # Shutdown scheduler on shutdown
+    shutdown_scheduler()
+    logger.info("Application shutting down, scheduler stopped")
 
 
 # Initialize FastAPI app

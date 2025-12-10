@@ -111,6 +111,24 @@ CREATE TABLE IF NOT EXISTS payments (
 
 CREATE INDEX IF NOT EXISTS idx_payments_booking ON payments(booking_id);
 
+-- Travel News / Guides URLs Table
+CREATE TABLE IF NOT EXISTS travel_news_urls (
+    news_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(255) NOT NULL,
+    url VARCHAR(2048) NOT NULL UNIQUE,
+    snippet TEXT,
+    date DATE,
+    last_updated DATE,
+    source_type VARCHAR(50) DEFAULT 'news', -- news | guide
+    destination VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_travel_news_url ON travel_news_urls(url);
+CREATE INDEX IF NOT EXISTS idx_travel_news_date ON travel_news_urls(date DESC);
+CREATE INDEX IF NOT EXISTS idx_travel_news_source_type ON travel_news_urls(source_type);
+
 -- Chat History Table
 CREATE TABLE IF NOT EXISTS chat_history (
     message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
