@@ -113,6 +113,9 @@ class Settings(BaseSettings):
     TRAVEL_NEWS_SCHEDULE_HOUR: int = 17  # Hour để chạy scheduled job (17 = 5 PM)
     TRAVEL_NEWS_SCHEDULE_MINUTE: int = 0  # Minute để chạy scheduled job
     
+    # Admin Recommendation Configuration
+    ADMIN_RECOMMENDATION_ENABLED: bool = False  # Enable Admin Mode for tour recommendations (override AI with featured tours)
+    
     @field_validator('OPENAI_API_KEY', mode='before')
     @classmethod
     def prefer_exported_openai_key(cls, v):
