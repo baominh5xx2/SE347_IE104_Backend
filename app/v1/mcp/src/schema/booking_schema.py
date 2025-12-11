@@ -2,14 +2,18 @@
 Booking Tools Schema
 Input schemas for booking-related MCP tools
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional
 
 
 class CreateBookingInput(BaseModel):
     """Input schema for create_booking tool"""
-    user_phone: str = Field(..., description="User phone number (Vietnamese format, e.g., '0901234567')")
-    user_email: str = Field(..., description="User email to send OTP")
+    user_phone: str = Field(..., description="User phone number (Vietnamese format, e.g., '0901234567'), you must ask user for this information")
+    user_email: str = Field(
+        ...,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+        description="User email to send OTP, you must ask user for this information (không được dùng email giả/placeholder)"
+    )
     package_id: str = Field(
         ...,
         description=(
@@ -17,9 +21,19 @@ class CreateBookingInput(BaseModel):
             "Use EXACT package_id from the internal context message; never invent IDs like 'pkg_1' or 'tour_1'."
         )
     )
-    number_of_people: int = Field(..., ge=1, le=50, description="Number of people (1-50)")
-    special_requests: Optional[str] = Field(default="", description="Special requests or dietary restrictions")
+    number_of_people: int = Field(..., ge=1, le=50, description="Number of people (1-50), you must ask user for this information")
+    special_requests: Optional[str] = Field(default="", description="Special requests or dietary restrictions, you must ask user for this information")
     user_id: Optional[str] = Field(None, description="User ID if available (for authenticated users)")
+
+    @validator("user_email")
+    def validate_real_email(cls, v: str) -> str:
+        """
+        Reject placeholder emails (e.g., email@example.com) to force collecting real email.
+        """
+        placeholders = {"email@example.com", "user@example.com", "example@example.com"}
+        if v.strip().lower() in placeholders:
+            raise ValueError("Email không hợp lệ, vui lòng cung cấp email thật để nhận OTP")
+        return v
 
 
 class UpdateBookingInput(BaseModel):

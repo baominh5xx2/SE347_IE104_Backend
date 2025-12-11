@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # OpenAI Configuration
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-5-mini"
+    # LLM Provider Switch
+    LLM_PROVIDER: str = "openai"  # Options: openai | modal
+    MODAL_API_URL: str = ""  # Modal endpoint (OpenAI-compatible)
+    MODAL_API_KEY: str = ""  # Modal auth token if required
     # Perplexity Configuration
     PERPLEXITY_API_KEY: str = ""
     OPENAI_ORGANIZATION: str = ""  # Optional: OpenAI organization ID for organization-level API access

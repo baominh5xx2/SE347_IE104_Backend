@@ -4,9 +4,9 @@ Base class for all agents with common functionality
 """
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-from langchain_openai import ChatOpenAI
 from app.v1.services.agent_services.config import agent_config
 from app.v1.core.logging_config import agent_callback
+from app.v1.services.agent_services.llm_providers import create_llm_provider
 import logging
 
 logger = logging.getLogger(__name__)
@@ -71,8 +71,10 @@ class BaseAgent(ABC):
         if agent_config.organization:
             llm_kwargs["organization"] = agent_config.organization
         
-        self.llm = ChatOpenAI(**llm_kwargs)
+        # Use provider factory to create LLM (OpenAI or Modal)
+        provider = create_llm_provider()
+        self.llm = provider.get_llm(**llm_kwargs)
     
-    def get_llm(self) -> ChatOpenAI:
+    def get_llm(self):
         """Get LLM instance"""
         return self.llm

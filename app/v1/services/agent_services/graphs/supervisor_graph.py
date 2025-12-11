@@ -6,7 +6,6 @@ Main orchestration graph for multi-agent system
 from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langchain_openai import ChatOpenAI
 import logging
 import os
 
@@ -26,6 +25,7 @@ except ImportError:
 from app.v1.services.agent_services.state import AgentState
 from app.v1.services.agent_services.nodes import ChatAgentNodes, RecommendationAgentNodes
 from app.v1.services.agent_services.config import agent_config
+from app.v1.services.agent_services.llm_providers import create_llm_provider
 from app.v1.core.logging_config import agent_callback
 from app.v1.services.chat_room_service import ChatRoomService
 from app.v1.core.supabase import get_supabase_client
@@ -84,7 +84,8 @@ class SupervisorGraph:
         if agent_config.organization:
             llm_kwargs["organization"] = agent_config.organization
         
-        self.llm = ChatOpenAI(**llm_kwargs)
+        provider = create_llm_provider()
+        self.llm = provider.get_llm(**llm_kwargs)
         
         # Initialize nodes with LLM
         self.chat_nodes = ChatAgentNodes(self.llm)
