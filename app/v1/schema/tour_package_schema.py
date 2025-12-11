@@ -122,3 +122,27 @@ class TourPackageSearchResponse(BaseModel):
     EM: str = Field("Success", description="Error message")
     found: int = Field(..., description="Số lượng tour packages tìm thấy")
     packages: List[dict] = Field(..., description="Danh sách tour packages với scores")
+
+
+# ============================================================================
+# Admin Recommendation Schemas
+# ============================================================================
+
+class AdminRecommendationConfig(BaseModel):
+    """Schema for admin recommendation configuration"""
+    enabled: bool = Field(..., description="Admin Mode enabled (True) or AI Mode (False)")
+    featured_tours: List[dict] = Field(..., description="List of featured tour packages")
+    total_featured: int = Field(..., description="Total number of featured tours")
+
+
+class AdminRecommendationUpdate(BaseModel):
+    """Schema for updating admin recommendation settings"""
+    enabled: Optional[bool] = Field(None, description="Toggle Admin/AI mode")
+    tour_package_ids: Optional[List[UUID]] = Field(None, description="List of package IDs to set as featured (will unset others)")
+
+
+class AdminRecommendationResponse(BaseModel):
+    """Schema for admin recommendation API response"""
+    EC: int = Field(0, description="Error code (0 = success)")
+    EM: str = Field("Success", description="Error message")
+    data: Optional[AdminRecommendationConfig] = Field(None, description="Configuration data")

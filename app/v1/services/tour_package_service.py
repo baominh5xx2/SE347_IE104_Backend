@@ -28,6 +28,10 @@ except ImportError:
     mem0_client = None
     logging.warning("Mem0 client not available - personalization disabled")
 
+# Import admin services
+from .admin_settings_service import AdminSettingsService
+from .admin_featured_tours_service import AdminFeaturedToursService
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,6 +52,10 @@ class TourPackageService:
             openai.api_key = openai_api_key
         # Use text-embedding-3-small for 1536 dimensions (matches database schema)
         self.embedding_model = "text-embedding-3-small"
+        
+        # Initialize admin services
+        self.admin_settings = AdminSettingsService(supabase_client)
+        self.admin_featured_tours = AdminFeaturedToursService(supabase_client)
     
     async def _generate_embedding(self, package_data: Dict[str, Any]) -> Optional[List[float]]:
         """
@@ -642,28 +650,144 @@ class TourPackageService:
                 "packages": []
             }
     
+    # ============================================================================
+    # Admin Settings & Featured Tours (delegated to separate services)
+    # ============================================================================
+    
+    def get_admin_setting(self, setting_key: str, default_value: Any = None) -> Any:
+        """Delegate to AdminSettingsService"""
+        return self.admin_settings.get_admin_setting(setting_key, default_value)
+    
+    def set_admin_setting(self, setting_key: str, setting_value: Any, updated_by: Optional[str] = None) -> bool:
+        """Delegate to AdminSettingsService"""
+        return self.admin_settings.set_admin_setting(setting_key, setting_value, updated_by)
+    
+    def get_featured_tours(self) -> List[Dict[str, Any]]:
+        """Delegate to AdminFeaturedToursService"""
+        return self.admin_featured_tours.get_featured_tours()
+    
+    def update_featured_tours(self, tour_package_ids: List[UUID]) -> Dict[str, Any]:
+        """Delegate to AdminFeaturedToursService"""
+        return self.admin_featured_tours.update_featured_tours(tour_package_ids)
+    
     async def recommend_packages(
         self,
         user_id: str,
         k: int = 5
     ) -> Dict[str, Any]:
         """
-        Recommend tour packages dựa trên tour gần hết hạn và đặc điểm user từ Mem0
+        Recommend tour packages với Admin Mode support
         
         Logic:
-        1. Tìm 10 tour gần hết hạn nhất (end_date gần nhất, is_active=True, available_slots > 0)
-        2. Lấy đặc điểm user từ Mem0 (preferences, lịch sử tìm kiếm)
-        3. Dùng hybrid search để tìm k tour phù hợp nhất từ 10 tour gần hết hạn
+        - Nếu ADMIN_RECOMMENDATION_ENABLED = True:
+          1. Lấy featured tours (is_featured=TRUE)
+          2. Nếu đủ >= k, trả k tours (cắt)
+          3. Nếu thiếu, fallback AI để bù đủ (k - len(featured))
+        - Nếu ADMIN_RECOMMENDATION_ENABLED = False:
+          Standard AI recommendation với expiring tours + Mem0 personalization
         
         Args:
             user_id: User ID để lấy đặc điểm từ Mem0
             k: Số lượng tour được recommend (1-10)
             
         Returns:
-            Dict with EC, EM, found, and packages list
+            Dict with EC, EM, found, packages, and mode (admin/ai/hybrid)
         """
         try:
-            from datetime import datetime, timezone
+            from ..core.config import settings
+            
+            # Check Admin Mode (from database, fallback to settings)
+            admin_mode_enabled = self.get_admin_setting(
+                'ADMIN_RECOMMENDATION_ENABLED',
+                default_value=settings.ADMIN_RECOMMENDATION_ENABLED
+            )
+            
+            if admin_mode_enabled:
+                logger.info("🎯 Admin Mode ENABLED - Using featured tours")
+                
+                # Get featured tours
+                featured_tours = self.get_featured_tours()
+                
+                if len(featured_tours) >= k:
+                    # Đủ featured tours, trả k tours
+                    selected_tours = featured_tours[:k]
+                    
+                    # Remove description from response
+                    filtered_packages = [{k: v for k, v in pkg.items() if k != 'description'} for pkg in selected_tours]
+                    
+                    logger.info(f"✅ Returned {len(filtered_packages)} featured tours (Admin Mode)")
+                    
+                    return {
+                        "EC": 0,
+                        "EM": "Successfully recommended featured tours (Admin Mode)",
+                        "found": len(filtered_packages),
+                        "packages": filtered_packages,
+                        "mode": "admin"
+                    }
+                else:
+                    # Thiếu featured tours, fallback AI
+                    needed_count = k - len(featured_tours)
+                    logger.info(f"⚠️ Only {len(featured_tours)} featured tours, need {needed_count} more from AI")
+                    
+                    # Get AI recommendations (exclude featured tours)
+                    featured_ids = {str(tour.get('package_id')) for tour in featured_tours}
+                    ai_result = await self._ai_recommend_packages(user_id, needed_count, exclude_ids=featured_ids)
+                    
+                    # Combine: featured first, then AI
+                    combined_packages = featured_tours + ai_result.get('packages', [])
+                    combined_packages = combined_packages[:k]
+                    
+                    # Remove description
+                    filtered_packages = [{k: v for k, v in pkg.items() if k != 'description'} for pkg in combined_packages]
+                    
+                    logger.info(f"✅ Hybrid: {len(featured_tours)} featured + {len(ai_result.get('packages', []))} AI = {len(filtered_packages)} total")
+                    
+                    return {
+                        "EC": 0,
+                        "EM": f"Hybrid recommendation: {len(featured_tours)} featured + {len(ai_result.get('packages', []))} AI",
+                        "found": len(filtered_packages),
+                        "packages": filtered_packages,
+                        "mode": "hybrid"
+                    }
+            else:
+                # Admin Mode disabled - use AI recommendation
+                logger.info("🤖 Admin Mode DISABLED - Using AI recommendation")
+                ai_result = await self._ai_recommend_packages(user_id, k)
+                ai_result['mode'] = 'ai'
+                return ai_result
+                
+        except Exception as e:
+            logger.error(f"Error in recommend_packages: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "EC": 1,
+                "EM": f"Error recommending tour packages: {str(e)}",
+                "found": 0,
+                "packages": [],
+                "mode": "error"
+            }
+    
+    async def _ai_recommend_packages(
+        self,
+        user_id: str,
+        k: int = 5,
+        exclude_ids: Optional[set] = None
+    ) -> Dict[str, Any]:
+        """
+        AI recommendation logic (original recommend_packages logic)
+        
+        Args:
+            user_id: User ID
+            k: Number of recommendations
+            exclude_ids: Set of package IDs to exclude (e.g., already featured)
+            
+        Returns:
+            Dict with packages
+        """
+        try:
+            if exclude_ids is None:
+                exclude_ids = set()
             
             # Step 1: Tìm 10 tour gần hết hạn nhất
             now = datetime.now(timezone.utc).isoformat()
@@ -678,6 +802,10 @@ class TourPackageService:
             
             result = query.execute()
             expiring_tours = result.data if result.data else []
+            
+            # Filter out excluded IDs
+            if exclude_ids:
+                expiring_tours = [tour for tour in expiring_tours if str(tour.get('package_id')) not in exclude_ids]
             
             if not expiring_tours:
                 return {
@@ -705,7 +833,7 @@ class TourPackageService:
                         for mem in memories:
                             content = mem.get('memory', '') or mem.get('content', '') or mem.get('text', '')
                             if content:
-                                preference_texts.append(content)  # Limit length
+                                preference_texts.append(content)
                         
                         if preference_texts:
                             user_preferences = ". ".join(preference_texts)
@@ -738,8 +866,6 @@ class TourPackageService:
             expiring_package_ids = [str(tour.get('package_id', '')) for tour in expiring_tours if tour.get('package_id')]
             
             # Search với search service - nhưng cần filter để chỉ lấy từ expiring tours
-            # Vì search service không hỗ trợ filter by package_ids trực tiếp,
-            # ta sẽ search và filter kết quả sau
             all_packages = await tour_package_search_service.search_tour_packages(
                 user_message=search_query,
                 filters=None,
@@ -811,3 +937,5 @@ class TourPackageService:
                 "found": 0,
                 "packages": []
             }
+    
+    

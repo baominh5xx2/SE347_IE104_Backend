@@ -24,6 +24,8 @@ from ...schema.tour_package_schema import (
 )
 from ...services.tour_package_service import TourPackageService
 from ...core.supabase import get_supabase_client
+from ...core.dependencies import get_current_user
+from ...core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -635,3 +637,5 @@ async def create_tour_packages_from_csv(
     except Exception as e:
         logger.error(f"Error in create_tour_packages_from_csv endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Lỗi xử lý file CSV: {str(e)}")
+
+
