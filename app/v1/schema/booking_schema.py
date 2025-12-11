@@ -13,6 +13,7 @@ class BookingBase(BaseModel):
     number_of_people: int = Field(..., ge=1, description="Số lượng người (tối thiểu 1)")
     contact_name: str = Field(..., min_length=2, max_length=100, description="Tên người liên hệ")
     contact_phone: str = Field(..., min_length=10, max_length=20, description="Số điện thoại liên hệ")
+    contact_email: Optional[str] = Field(None, description="Email liên hệ (cho OTP)")
     special_requests: Optional[str] = Field(None, max_length=500, description="Yêu cầu đặc biệt")
     user_id: UUID = Field(..., description="ID của người dùng đặt tour")
     promotion_id: Optional[UUID] = Field(None, description="ID của mã khuyến mãi (nếu có) - dùng promotion_id HOẶC promotion_code")
@@ -28,6 +29,7 @@ class BookingCreate(BookingBase):
                 "number_of_people": 3,
                 "contact_name": "Nguyen Van B",
                 "contact_phone": "0123456789",
+                "contact_email": "user@example.com",
                 "special_requests": "Phòng view đẹp",
                 "user_id": "9b3d0691-eccd-4a81-9f43-383f5be344b8",
                 "promotion_code": "ABC12345"
@@ -42,6 +44,7 @@ class BookingUpdate(BaseModel):
             "example": {
                 "number_of_people": 3,
                 "contact_phone": "0987654321",
+                "contact_email": "newemail@example.com",
                 "promotion_code": "XYZ98765",
                 "status": "confirmed"
             }
@@ -51,6 +54,7 @@ class BookingUpdate(BaseModel):
     number_of_people: Optional[int] = Field(None, ge=1, description="Số lượng người (total_amount sẽ tự động cập nhật)")
     contact_name: Optional[str] = Field(None, min_length=2, max_length=100, description="Tên người liên hệ")
     contact_phone: Optional[str] = Field(None, min_length=10, max_length=20, description="Số điện thoại")
+    contact_email: Optional[str] = Field(None, description="Email liên hệ")
     special_requests: Optional[str] = Field(None, max_length=500, description="Yêu cầu đặc biệt")
     promotion_id: Optional[UUID] = Field(None, description="ID mã khuyến mãi (total_amount sẽ tự động tính lại)")
     promotion_code: Optional[str] = Field(None, description="Mã khuyến mãi 8 ký tự (ưu tiên dùng code)")
@@ -66,6 +70,7 @@ class BookingResponse(BaseModel):
     total_amount: float = Field(..., description="Tổng số tiền sau khuyến mãi")
     contact_name: str
     contact_phone: str
+    contact_email: Optional[str] = Field(None, description="Email liên hệ")
     special_requests: Optional[str]
     promotion_id: Optional[UUID] = Field(None, description="ID mã khuyến mãi đã áp dụng")
     status: str
@@ -152,6 +157,7 @@ class MyBookingDetail(BaseModel):
     total_amount: float = Field(..., description="Tổng số tiền")
     contact_name: str = Field(..., description="Tên người liên hệ")
     contact_phone: str = Field(..., description="Số điện thoại liên hệ")
+    contact_email: Optional[str] = Field(None, description="Email liên hệ")
     special_requests: Optional[str] = Field(None, description="Yêu cầu đặc biệt")
     created_at: datetime = Field(..., description="Ngày tạo")
     updated_at: datetime = Field(..., description="Ngày cập nhật")
@@ -205,3 +211,67 @@ class AdminBookingDetailResponse(BaseModel):
     EC: int = Field(..., description="Error code (0 = success)")
     EM: str = Field(..., description="Error message")
     data: Optional[MyBookingDetail] = None
+
+
+# ============================================
+# Schemas for OTP Booking Flow
+# ============================================
+
+class BookingCreateWithOTP(BaseModel):
+    """Schema for creating booking with OTP (user tự gửi user_id)"""
+    package_id: UUID = Field(..., description="ID của tour package")
+    number_of_people: int = Field(..., ge=1, description="Số lượng người (tối thiểu 1)")
+    contact_name: str = Field(..., min_length=2, max_length=100, description="Tên người liên hệ")
+    contact_phone: str = Field(..., min_length=10, max_length=20, description="Số điện thoại liên hệ")
+    contact_email: str = Field(..., description="Email để nhận OTP")
+    special_requests: Optional[str] = Field(None, max_length=500, description="Yêu cầu đặc biệt")
+    user_id: UUID = Field(..., description="ID của người dùng đặt tour (bắt buộc)")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "package_id": "07e8c89e-90d4-4ebc-9302-384dc6cb2f0c",
+                "number_of_people": 2,
+                "contact_name": "Nguyen Van A",
+                "contact_phone": "0901234567",
+                "contact_email": "user@example.com",
+                "special_requests": "Phòng view đẹp",
+                "user_id": "abfdf6b6-b58a-4cb7-9703-a7641454fd94"
+            }
+        }
+    )
+
+
+class VerifyOTPRequest(BaseModel):
+    """Schema for verifying OTP"""
+    booking_id: UUID = Field(..., description="ID của booking cần verify")
+    otp_code: str = Field(..., min_length=6, max_length=6, pattern="^[0-9]{6}$", description="Mã OTP 6 số")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "booking_id": "123e4567-e89b-12d3-a456-426614174000",
+                "otp_code": "123456"
+            }
+        }
+    )
+
+
+class BookingOTPResponse(BaseModel):
+    """Response schema for OTP booking operations"""
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[dict] = Field(None, description="Response data")
+
+
+class ResendOTPRequest(BaseModel):
+    """Schema for resending OTP"""
+    booking_id: UUID = Field(..., description="ID của booking cần gửi lại OTP")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "booking_id": "123e4567-e89b-12d3-a456-426614174000"
+            }
+        }
+    )
