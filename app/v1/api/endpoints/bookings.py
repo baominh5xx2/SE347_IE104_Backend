@@ -7,13 +7,15 @@ from typing import Optional
 from uuid import UUID
 
 from ...schema.booking_schema import (
-    BookingCreate,
     BookingUpdate,
     BookingListResponse,
     BookingDetailResponse,
-    BookingCreateResponse,
     BookingUpdateResponse,
-    BookingDeleteResponse
+    BookingDeleteResponse,
+    BookingCreateWithOTP,
+    VerifyOTPRequest,
+    BookingOTPResponse,
+    ResendOTPRequest
 )
 from ...services.booking_service import BookingService
 from ...core.supabase import get_supabase_client
@@ -102,51 +104,6 @@ async def get_booking(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/", response_model=BookingCreateResponse, status_code=201)
-async def create_booking(
-    booking: BookingCreate,
-    current_user: dict = Depends(get_current_user),
-    service: BookingService = Depends(get_booking_service)
-):
-    """
-    Tạo booking mới. `total_amount` tự tính = `price * number_of_people`.
-    
-    - Admin: Tạo booking ngay với status "confirmed", không cần OTP
-    - User thường: Tạo booking với status "pending", cần OTP (nhưng API này không gửi OTP, chỉ có Chat Agent mới gửi)
-    
-    Args:
-        booking: Dữ liệu booking (package_id, number_of_people, contact_name, contact_phone, user_id, special_requests?)
-        current_user: Current authenticated user (from JWT token)
-        service: Booking service instance
-    
-    Returns:
-        BookingCreateResponse: Kết quả tạo booking, bao gồm `total_amount` đã tính và thông tin booking
-    """
-    try:
-        booking_data = booking.model_dump()
-        
-        # Check role
-        user_role = current_user.get("role", "user")
-        
-        if user_role == "admin":
-            # Admin: skip OTP, tạo booking confirmed ngay
-            booking_data["status"] = "confirmed"
-        else:
-            # User thường qua API: tạo pending (không có OTP flow ở API)
-            booking_data["status"] = "pending"
-        
-        result = await service.create_booking(booking_data)
-        
-        if result["EC"] != 0:
-            raise HTTPException(status_code=400, detail=result["EM"])
-        
-        return BookingCreateResponse(**result)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in create_booking endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/{booking_id}", response_model=BookingUpdateResponse)
@@ -217,4 +174,159 @@ async def delete_booking(
         raise
     except Exception as e:
         logger.error(f"Error in delete_booking endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/create-with-otp", response_model=BookingOTPResponse, status_code=201)
+async def create_booking_with_otp(
+    booking: BookingCreateWithOTP,
+    service: BookingService = Depends(get_booking_service)
+):
+    """
+    Tạo booking mới với OTP verification (giống flow của chatbot).
+    
+    **KHÔNG YÊU CẦU AUTHENTICATION**: User tự gửi user_id trong request body.
+    
+    Flow:
+    1. Validate package & check slots
+    2. Create booking với status="otp_sent"
+    3. Generate OTP (6 số)
+    4. Store OTP vào database
+    5. Send OTP qua email
+    6. Update package slots
+    7. Return booking_id và awaiting_otp=True
+    
+    Args:
+        booking: Booking data (requires contact_email và user_id)
+        service: Booking service instance
+    
+    Returns:
+        BookingOTPResponse với booking_id và awaiting_otp flag
+        
+    Example:
+        POST /api/v1/bookings/create-with-otp
+        Body: {
+            "package_id": "uuid",
+            "number_of_people": 2,
+            "contact_name": "Nguyen Van A",
+            "contact_phone": "0901234567",
+            "contact_email": "user@example.com",
+            "special_requests": "Phòng view đẹp",
+            "user_id": "uuid"
+        }
+    """
+    try:
+        booking_data = booking.model_dump()
+        
+        # Validate user_id is provided
+        if not booking_data.get('user_id'):
+            raise HTTPException(status_code=400, detail="user_id is required")
+        
+        result = await service.create_booking_with_otp(booking_data)
+        
+        if result["EC"] != 0:
+            raise HTTPException(status_code=400, detail=result["EM"])
+        
+        return BookingOTPResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in create_booking_with_otp endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/verify-otp", response_model=BookingOTPResponse)
+async def verify_otp(
+    verify_request: VerifyOTPRequest,
+    service: BookingService = Depends(get_booking_service)
+):
+    """
+    Verify OTP code và confirm booking (giống flow của chatbot).
+    
+    Flow:
+    1. Get OTP record từ database
+    2. Validate OTP code
+    3. Check expiry (5 minutes)
+    4. Check attempts (max 3)
+    5. Mark OTP as verified
+    6. Update booking status: "otp_sent" → "pending"
+    7. Return booking confirmation
+    
+    Args:
+        verify_request: Booking ID và OTP code
+        service: Booking service instance
+    
+    Returns:
+        BookingOTPResponse với booking confirmation
+        
+    Example:
+        POST /api/v1/bookings/verify-otp
+        {
+            "booking_id": "uuid",
+            "otp_code": "123456"
+        }
+    """
+    try:
+        result = await service.verify_otp(
+            booking_id=str(verify_request.booking_id),
+            otp_code=verify_request.otp_code
+        )
+        
+        if result["EC"] != 0:
+            raise HTTPException(status_code=400, detail=result["EM"])
+        
+        return BookingOTPResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in verify_otp endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/resend-otp", response_model=BookingOTPResponse)
+async def resend_otp(
+    resend_request: ResendOTPRequest,
+    service: BookingService = Depends(get_booking_service)
+):
+    """
+    Gửi lại OTP khi mã cũ hết hạn hoặc không nhận được.
+    
+    Flow:
+    1. Get booking info và validate status (phải là "otp_sent")
+    2. Get email từ OTP record cũ
+    3. Delete OTP records cũ
+    4. Generate OTP mới
+    5. Store OTP mới vào database
+    6. Send OTP qua email
+    7. Return confirmation
+    
+    Args:
+        resend_request: Booking ID
+        service: Booking service instance
+    
+    Returns:
+        BookingOTPResponse với confirmation
+        
+    Example:
+        POST /api/v1/bookings/resend-otp
+        {
+            "booking_id": "uuid"
+        }
+    """
+    try:
+        result = await service.resend_otp(
+            booking_id=str(resend_request.booking_id)
+        )
+        
+        if result["EC"] != 0:
+            raise HTTPException(status_code=400, detail=result["EM"])
+        
+        return BookingOTPResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in resend_otp endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
