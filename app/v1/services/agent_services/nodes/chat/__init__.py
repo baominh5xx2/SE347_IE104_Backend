@@ -58,12 +58,27 @@ class ChatAgentNodes:
                         messages.append(msg)
             
             # Get LLM response with tools bound
-            llm_with_tools = self.llm.bind_tools(self.tools)
+            # Try with tools first, fallback to no tools if provider doesn't support it
             agent_callback = get_current_agent_callback()
-            response = await llm_with_tools.ainvoke(
-                messages,
-                config={"callbacks": [agent_callback]}
-            )
+            try:
+                llm_with_tools = self.llm.bind_tools(self.tools)
+                response = await llm_with_tools.ainvoke(
+                    messages,
+                    config={"callbacks": [agent_callback]}
+                )
+            except Exception as e:
+                error_msg = str(e)
+                # Check if error is about tool calling not supported
+                if "tool choice" in error_msg.lower() or "tool-call" in error_msg.lower():
+                    logger.warning(f"⚠️ Tool calling not supported by LLM provider, falling back to no tools: {error_msg}")
+                    # Fallback: use LLM without tools
+                    response = await self.llm.ainvoke(
+                        messages,
+                        config={"callbacks": [agent_callback]}
+                    )
+                else:
+                    # Re-raise if it's a different error
+                    raise
             
             # Log tool calls if any
             if hasattr(response, 'tool_calls') and response.tool_calls:
