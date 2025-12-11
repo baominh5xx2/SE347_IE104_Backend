@@ -78,9 +78,9 @@ async def _create_booking_impl(
                 # Create new user
                 logger.info("Creating new user...")
                 new_user = {
-                    "phone_number": user_phone,
-                    "full_name": f"Khách hàng {user_phone[-4:]}",
-                    "email": f"{user_phone}@temp.com"
+                "phone_number": user_phone,
+                "full_name": f"Khách hàng {user_phone[-4:]}",
+                "email": user_email  # store real email
                 }
                 # If user_id was provided but not found, use it for the new user
                 if user_id:
@@ -102,6 +102,7 @@ async def _create_booking_impl(
             "total_amount": total_amount,
             "contact_name": user.get('full_name', user_phone),
             "contact_phone": user_phone,
+            "contact_email": user_email,  # store email on booking
             "special_requests": special_requests or "",
             "status": "otp_sent",
             "created_at": datetime.now().isoformat(),
