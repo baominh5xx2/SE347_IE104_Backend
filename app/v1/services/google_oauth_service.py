@@ -198,11 +198,15 @@ class GoogleOAuthService:
                         "EM": "Account is not activated"
                     }
                 
+                # Get user role (default to 'user' if not set)
+                role = user.get('role', 'user')
+                
                 # Generate access token
                 access_token = auth_service._generate_access_token({
                     "email": user["email"],
                     "full_name": user["full_name"],
-                    "user_id": user["user_id"]
+                    "user_id": user["user_id"],
+                    "role": role
                 })
                 
                 return {
@@ -214,7 +218,8 @@ class GoogleOAuthService:
                         "email": user["email"],
                         "full_name": user["full_name"],
                         "phone_number": user.get("phone_number"),
-                        "profile_picture": user.get("profile_picture")
+                        "profile_picture": user.get("profile_picture"),
+                        "role": role
                     }
                 }
             else:
@@ -237,11 +242,15 @@ class GoogleOAuthService:
                 if create_result.data:
                     user = create_result.data[0]
                     
+                    # Get user role (default to 'user' if not set)
+                    role = user.get('role', 'user')
+                    
                     # Generate access token
                     access_token = auth_service._generate_access_token({
                         "email": user["email"],
                         "full_name": user["full_name"],
-                        "user_id": user["user_id"]
+                        "user_id": user["user_id"],
+                        "role": role
                     })
                     
                     return {
@@ -253,7 +262,8 @@ class GoogleOAuthService:
                             "email": user["email"],
                             "full_name": user["full_name"],
                             "phone_number": user.get("phone_number"),
-                            "profile_picture": user.get("profile_picture")
+                            "profile_picture": user.get("profile_picture"),
+                            "role": role
                         }
                     }
                 else:

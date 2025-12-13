@@ -86,7 +86,8 @@ class LoginResponse(BaseModel):
                 "user": {
                     "user_id": "bcde5ff1-5fd7-49e0-8790-05463092d54e",
                     "email": "a.nguyen@example.com",
-                    "full_name": "Nguyen Van A"
+                    "full_name": "Nguyen Van A",
+                    "role": "user"
                 }
             }
         }
@@ -129,6 +130,8 @@ class VerifyTokenResponse(BaseModel):
                 "data": {
                     "email": "a.nguyen@example.com",
                     "full_name": "Nguyen Van A",
+                    "user_id": "bcde5ff1-5fd7-49e0-8790-05463092d54e",
+                    "role": "user",
                     "exp": 1730361234
                 }
             }
