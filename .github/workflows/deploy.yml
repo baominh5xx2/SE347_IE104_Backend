@@ -35,6 +35,15 @@ jobs:
               git pull origin develop
             fi
             
+            # Auto-restructure: Move backend files to Backend/ folder if needed
+            if [ -f "$PROJECT_DIR/main.py" ] && [ ! -d "$PROJECT_DIR/Backend" ]; then
+              echo "=== Restructuring: Moving backend code to Backend/ folder ==="
+              mkdir -p "$PROJECT_DIR/Backend"
+              # Move backend files (exclude Frontend folder and docker-compose.yml)
+              find "$PROJECT_DIR" -maxdepth 1 -type f -not -name "docker-compose.yml" -exec mv {} "$PROJECT_DIR/Backend/" \; 2>/dev/null || true
+              find "$PROJECT_DIR" -maxdepth 1 -type d -not -name "." -not -name "Backend" -not -name "SE347_IE104_Frontend" -not -name ".git" -exec mv {} "$PROJECT_DIR/Backend/" \; 2>/dev/null || true
+            fi
+            
             echo "=== Stopping existing containers ==="
             docker compose down
             
