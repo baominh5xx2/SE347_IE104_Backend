@@ -67,7 +67,7 @@ class AuthService:
         Generate JWT access token
         
         Args:
-            user_data: User data to include in token payload
+            user_data: User data to include in token payload (must include email, full_name, user_id, role)
             
         Returns:
             str: JWT access token
@@ -76,6 +76,7 @@ class AuthService:
             "email": user_data["email"],
             "full_name": user_data["full_name"],
             "user_id": user_data["user_id"],
+            "role": user_data.get("role", "user"),  # Include role in JWT
             "exp": datetime.now(timezone.utc) + timedelta(days=self.jwt_expire)
         }
         
@@ -223,11 +224,15 @@ class AuthService:
                     "EM": "Account is not activated"
                 }
             
+            # Get user role (default to 'user' if not set)
+            role = user.get('role', 'user')
+            
             # Generate access token
             access_token = self._generate_access_token({
                 "email": user["email"],
                 "full_name": user["full_name"],
-                "user_id": user["user_id"]
+                "user_id": user["user_id"],
+                "role": role
             })
             
             return {
@@ -238,7 +243,8 @@ class AuthService:
                     "user_id": user["user_id"],
                     "email": user["email"],
                     "full_name": user["full_name"],
-                    "phone_number": user.get("phone_number")
+                    "phone_number": user.get("phone_number"),
+                    "role": role
                 }
             }
             
@@ -268,6 +274,7 @@ class AuthService:
                     "email": decoded.get("email"),
                     "full_name": decoded.get("full_name"),
                     "user_id": decoded.get("user_id"),
+                    "role": decoded.get("role", "user"),  # Include role from JWT
                     "exp": decoded.get("exp")
                 }
             }
@@ -482,7 +489,8 @@ class AuthService:
             access_token = self._generate_access_token({
                 "email": user["email"],
                 "full_name": user["full_name"],
-                "user_id": user["user_id"]
+                "user_id": user["user_id"],
+                "role": role
             })
             
             return {
