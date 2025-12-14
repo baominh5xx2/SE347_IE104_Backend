@@ -4,7 +4,7 @@ Handles CRUD operations for tour packages
 """
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from uuid import UUID
 from supabase import Client
 import openai
@@ -270,6 +270,273 @@ class TourPackageService:
             return {
                 "EC": 1,
                 "EM": f"Error retrieving tour packages: {str(e)}",
+                "total": 0,
+                "packages": []
+            }
+    
+    async def filter_packages_by_month(
+        self,
+        month: int,
+        year: int,
+        date_type: str = "start_date",
+        is_active: Optional[bool] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Filter tour packages by month and year
+        
+        Args:
+            month: Month (1-12)
+            year: Year
+            date_type: Type of date to filter ('start_date' or 'end_date')
+            is_active: Filter by active status
+            limit: Number of records to return
+            offset: Number of records to skip
+            
+        Returns:
+            Dict with EC, EM, total, and packages list
+        """
+        try:
+            # Build date range for the month
+            start_of_month = date(year, month, 1)
+            # Get last day of month
+            if month == 12:
+                end_of_month = date(year + 1, 1, 1)
+            else:
+                end_of_month = date(year, month + 1, 1)
+            
+            query = self.supabase.table('tour_packages').select('*')
+            
+            # Filter by date range
+            if date_type == "start_date":
+                query = query.gte('start_date', start_of_month.isoformat())
+                query = query.lt('start_date', end_of_month.isoformat())
+            else:  # end_date
+                query = query.gte('end_date', start_of_month.isoformat())
+                query = query.lt('end_date', end_of_month.isoformat())
+            
+            # Apply additional filters
+            if is_active is not None:
+                query = query.eq('is_active', is_active)
+            
+            # Order by date
+            query = query.order(date_type, desc=False)
+            
+            # Apply pagination
+            if limit:
+                query = query.limit(limit)
+            if offset:
+                query = query.offset(offset)
+            
+            result = query.execute()
+            
+            return {
+                "EC": 0,
+                "EM": f"Successfully retrieved tour packages for {month}/{year}",
+                "total": len(result.data),
+                "packages": result.data
+            }
+            
+        except Exception as e:
+            logger.error(f"Error filtering packages by month: {str(e)}")
+            return {
+                "EC": 1,
+                "EM": f"Error filtering tour packages: {str(e)}",
+                "total": 0,
+                "packages": []
+            }
+    
+    async def filter_packages_by_year(
+        self,
+        year: int,
+        date_type: str = "start_date",
+        is_active: Optional[bool] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Filter tour packages by year
+        
+        Args:
+            year: Year to filter
+            date_type: Type of date to filter ('start_date' or 'end_date')
+            is_active: Filter by active status
+            limit: Number of records to return
+            offset: Number of records to skip
+            
+        Returns:
+            Dict with EC, EM, total, and packages list
+        """
+        try:
+            # Build date range for the year
+            start_of_year = date(year, 1, 1)
+            end_of_year = date(year + 1, 1, 1)
+            
+            query = self.supabase.table('tour_packages').select('*')
+            
+            # Filter by date range
+            if date_type == "start_date":
+                query = query.gte('start_date', start_of_year.isoformat())
+                query = query.lt('start_date', end_of_year.isoformat())
+            else:  # end_date
+                query = query.gte('end_date', start_of_year.isoformat())
+                query = query.lt('end_date', end_of_year.isoformat())
+            
+            # Apply additional filters
+            if is_active is not None:
+                query = query.eq('is_active', is_active)
+            
+            # Order by date
+            query = query.order(date_type, desc=False)
+            
+            # Apply pagination
+            if limit:
+                query = query.limit(limit)
+            if offset:
+                query = query.offset(offset)
+            
+            result = query.execute()
+            
+            return {
+                "EC": 0,
+                "EM": f"Successfully retrieved tour packages for year {year}",
+                "total": len(result.data),
+                "packages": result.data
+            }
+            
+        except Exception as e:
+            logger.error(f"Error filtering packages by year: {str(e)}")
+            return {
+                "EC": 1,
+                "EM": f"Error filtering tour packages: {str(e)}",
+                "total": 0,
+                "packages": []
+            }
+    
+    async def filter_packages_by_date(
+        self,
+        target_date: date,
+        date_type: str = "start_date",
+        is_active: Optional[bool] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Filter tour packages by specific date
+        
+        Args:
+            target_date: Specific date to filter
+            date_type: Type of date to filter ('start_date' or 'end_date')
+            is_active: Filter by active status
+            limit: Number of records to return
+            offset: Number of records to skip
+            
+        Returns:
+            Dict with EC, EM, total, and packages list
+        """
+        try:
+            query = self.supabase.table('tour_packages').select('*')
+            
+            # Filter by exact date
+            query = query.eq(date_type, target_date.isoformat())
+            
+            # Apply additional filters
+            if is_active is not None:
+                query = query.eq('is_active', is_active)
+            
+            # Order by date
+            query = query.order(date_type, desc=False)
+            
+            # Apply pagination
+            if limit:
+                query = query.limit(limit)
+            if offset:
+                query = query.offset(offset)
+            
+            result = query.execute()
+            
+            return {
+                "EC": 0,
+                "EM": f"Successfully retrieved tour packages for {target_date.isoformat()}",
+                "total": len(result.data),
+                "packages": result.data
+            }
+            
+        except Exception as e:
+            logger.error(f"Error filtering packages by date: {str(e)}")
+            return {
+                "EC": 1,
+                "EM": f"Error filtering tour packages: {str(e)}",
+                "total": 0,
+                "packages": []
+            }
+    
+    async def filter_packages_by_price_range(
+        self,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        is_active: Optional[bool] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Filter tour packages by price range
+        
+        Args:
+            min_price: Minimum price (VND)
+            max_price: Maximum price (VND)
+            is_active: Filter by active status
+            limit: Number of records to return
+            offset: Number of records to skip
+            
+        Returns:
+            Dict with EC, EM, total, and packages list
+        """
+        try:
+            query = self.supabase.table('tour_packages').select('*')
+            
+            # Apply price filters
+            if min_price is not None:
+                query = query.gte('price', min_price)
+            if max_price is not None:
+                query = query.lte('price', max_price)
+            
+            # Apply additional filters
+            if is_active is not None:
+                query = query.eq('is_active', is_active)
+            
+            # Order by price ascending
+            query = query.order('price', desc=False)
+            
+            # Apply pagination
+            if limit:
+                query = query.limit(limit)
+            if offset:
+                query = query.offset(offset)
+            
+            result = query.execute()
+            
+            price_range_str = ""
+            if min_price is not None and max_price is not None:
+                price_range_str = f"from {min_price:,.0f} to {max_price:,.0f} VND"
+            elif min_price is not None:
+                price_range_str = f">= {min_price:,.0f} VND"
+            elif max_price is not None:
+                price_range_str = f"<= {max_price:,.0f} VND"
+            
+            return {
+                "EC": 0,
+                "EM": f"Successfully retrieved tour packages {price_range_str}",
+                "total": len(result.data),
+                "packages": result.data
+            }
+            
+        except Exception as e:
+            logger.error(f"Error filtering packages by price range: {str(e)}")
+            return {
+                "EC": 1,
+                "EM": f"Error filtering tour packages: {str(e)}",
                 "total": 0,
                 "packages": []
             }
