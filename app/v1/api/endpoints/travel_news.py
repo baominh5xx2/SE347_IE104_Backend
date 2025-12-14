@@ -23,7 +23,7 @@ class TravelNewsSearchRequest(BaseModel):
 # IMPORTANT: Specific routes must be defined BEFORE dynamic routes like /{k}
 # Otherwise FastAPI will match /list with /{k} and try to parse "list" as integer
 
-@router.get("/list")
+@router.get("/all")
 async def get_paginated_travel_news_list(
     source_type: Optional[str] = Query(None, description="Filter by source type: 'news' or 'guide'"),
     page: int = Query(1, ge=1, description="Page number"),
