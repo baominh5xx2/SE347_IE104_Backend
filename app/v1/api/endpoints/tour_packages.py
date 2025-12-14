@@ -162,6 +162,234 @@ async def get_tour_packages(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/filter/by-month", response_model=TourPackageListResponse)
+async def filter_tours_by_month(
+    month: int = Query(..., ge=1, le=12, description="Tháng (1-12)"),
+    year: int = Query(..., ge=2000, description="Năm (ví dụ: 2024)"),
+    date_type: str = Query("start_date", description="Loại ngày để lọc: 'start_date' hoặc 'end_date'"),
+    is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Lọc tour packages theo tháng
+    
+    Args:
+        month: Tháng cần lọc (1-12)
+        year: Năm cần lọc
+        date_type: Loại ngày để lọc ('start_date' hoặc 'end_date', mặc định: 'start_date')
+        is_active: Lọc theo trạng thái hoạt động
+        limit: Giới hạn số lượng kết quả trả về
+        offset: Bỏ qua số lượng bản ghi
+        service: Tour package service instance
+        
+    Returns:
+        TourPackageListResponse với danh sách tour packages
+        
+    Example:
+        GET /api/v1/tour-packages/filter/by-month?month=12&year=2024
+        GET /api/v1/tour-packages/filter/by-month?month=1&year=2025&date_type=end_date
+    """
+    try:
+        if date_type not in ['start_date', 'end_date']:
+            raise HTTPException(status_code=400, detail="date_type phải là 'start_date' hoặc 'end_date'")
+        
+        result = await service.filter_packages_by_month(
+            month=month,
+            year=year,
+            date_type=date_type,
+            is_active=is_active,
+            limit=limit,
+            offset=offset
+        )
+        return TourPackageListResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in filter_tours_by_month endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/filter/by-year", response_model=TourPackageListResponse)
+async def filter_tours_by_year(
+    year: int = Query(..., ge=2000, description="Năm cần lọc (ví dụ: 2024)"),
+    date_type: str = Query("start_date", description="Loại ngày để lọc: 'start_date' hoặc 'end_date'"),
+    is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Lọc tour packages theo năm
+    
+    Args:
+        year: Năm cần lọc
+        date_type: Loại ngày để lọc ('start_date' hoặc 'end_date', mặc định: 'start_date')
+        is_active: Lọc theo trạng thái hoạt động
+        limit: Giới hạn số lượng kết quả trả về
+        offset: Bỏ qua số lượng bản ghi
+        service: Tour package service instance
+        
+    Returns:
+        TourPackageListResponse với danh sách tour packages
+        
+    Example:
+        GET /api/v1/tour-packages/filter/by-year?year=2024
+        GET /api/v1/tour-packages/filter/by-year?year=2025&date_type=end_date
+    """
+    try:
+        if date_type not in ['start_date', 'end_date']:
+            raise HTTPException(status_code=400, detail="date_type phải là 'start_date' hoặc 'end_date'")
+        
+        result = await service.filter_packages_by_year(
+            year=year,
+            date_type=date_type,
+            is_active=is_active,
+            limit=limit,
+            offset=offset
+        )
+        return TourPackageListResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in filter_tours_by_year endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/filter/by-date", response_model=TourPackageListResponse)
+async def filter_tours_by_date(
+    target_date: date = Query(..., description="Ngày cần lọc (YYYY-MM-DD)"),
+    date_type: str = Query("start_date", description="Loại ngày để lọc: 'start_date' hoặc 'end_date'"),
+    is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Lọc tour packages theo ngày cụ thể
+    
+    Args:
+        target_date: Ngày cần lọc (YYYY-MM-DD)
+        date_type: Loại ngày để lọc ('start_date' hoặc 'end_date', mặc định: 'start_date')
+        is_active: Lọc theo trạng thái hoạt động
+        limit: Giới hạn số lượng kết quả trả về
+        offset: Bỏ qua số lượng bản ghi
+        service: Tour package service instance
+        
+    Returns:
+        TourPackageListResponse với danh sách tour packages
+        
+    Example:
+        GET /api/v1/tour-packages/filter/by-date?target_date=2024-12-25
+        GET /api/v1/tour-packages/filter/by-date?target_date=2024-12-25&date_type=end_date
+    """
+    try:
+        if date_type not in ['start_date', 'end_date']:
+            raise HTTPException(status_code=400, detail="date_type phải là 'start_date' hoặc 'end_date'")
+        
+        result = await service.filter_packages_by_date(
+            target_date=target_date,
+            date_type=date_type,
+            is_active=is_active,
+            limit=limit,
+            offset=offset
+        )
+        return TourPackageListResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in filter_tours_by_date endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/filter/by-price-range", response_model=TourPackageListResponse)
+async def filter_tours_by_price_range(
+    min_price: Optional[float] = Query(None, ge=0, description="Giá tối thiểu (VND)"),
+    max_price: Optional[float] = Query(None, ge=0, description="Giá tối đa (VND)"),
+    price_segment: Optional[str] = Query(None, description="Phân khúc giá: 'budget' (<5M), 'mid' (5M-15M), 'premium' (>15M)"),
+    is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Lọc tour packages theo phân khúc giá hoặc khoảng giá
+    
+    Args:
+        min_price: Giá tối thiểu (VND)
+        max_price: Giá tối đa (VND)
+        price_segment: Phân khúc giá nhanh:
+            - 'budget': < 5,000,000 VND
+            - 'mid': 5,000,000 - 15,000,000 VND
+            - 'premium': > 15,000,000 VND
+        is_active: Lọc theo trạng thái hoạt động
+        limit: Giới hạn số lượng kết quả trả về
+        offset: Bỏ qua số lượng bản ghi
+        service: Tour package service instance
+        
+    Returns:
+        TourPackageListResponse với danh sách tour packages
+        
+    Example:
+        GET /api/v1/tour-packages/filter/by-price-range?price_segment=budget
+        GET /api/v1/tour-packages/filter/by-price-range?min_price=5000000&max_price=15000000
+        GET /api/v1/tour-packages/filter/by-price-range?min_price=1000000
+    """
+    try:
+        # Validate price_segment if provided
+        valid_segments = ['budget', 'mid', 'premium']
+        if price_segment and price_segment not in valid_segments:
+            raise HTTPException(
+                status_code=400,
+                detail=f"price_segment phải là một trong: {', '.join(valid_segments)}"
+            )
+        
+        # If price_segment is provided, set min_price and max_price accordingly
+        if price_segment:
+            if price_segment == 'budget':
+                min_price = None
+                max_price = 5000000
+            elif price_segment == 'mid':
+                min_price = 5000000
+                max_price = 15000000
+            elif price_segment == 'premium':
+                min_price = 15000000
+                max_price = None
+        
+        # Validate that at least one filter is provided
+        if min_price is None and max_price is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Phải cung cấp ít nhất một trong: min_price, max_price, hoặc price_segment"
+            )
+        
+        # Validate min_price <= max_price if both are provided
+        if min_price is not None and max_price is not None and min_price > max_price:
+            raise HTTPException(
+                status_code=400,
+                detail="min_price phải nhỏ hơn hoặc bằng max_price"
+            )
+        
+        result = await service.filter_packages_by_price_range(
+            min_price=min_price,
+            max_price=max_price,
+            is_active=is_active,
+            limit=limit,
+            offset=offset
+        )
+        return TourPackageListResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in filter_tours_by_price_range endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{package_id}", response_model=TourPackageDetailResponse)
 async def get_tour_package(
     package_id: UUID,
