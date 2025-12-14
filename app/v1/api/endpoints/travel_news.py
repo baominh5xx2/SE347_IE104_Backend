@@ -144,7 +144,7 @@ async def search_travel_news(request: TravelNewsSearchRequest):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@router.get("/{k}")
+@router.get("/{k:int}")
 async def get_travel_news(
     k: int = Path(..., ge=1, description="Number of latest news items to fetch for today"),
     source_type: Optional[str] = Query(None, description="Filter by source type: 'news' or 'guide'"),
