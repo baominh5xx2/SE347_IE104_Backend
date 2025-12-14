@@ -349,6 +349,74 @@ class AdminUserService:
                 "EM": f"Error retrieving user summary: {str(e)}",
                 "data": None
             }
+    
+    def get_user_chat_history(self, user_id: str) -> Dict[str, Any]:
+        """
+        Get user's chat history grouped by chat rooms
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            Dict with EC, EM, data keys
+        """
+        try:
+            # Get all chat rooms for user
+            rooms_response = self.supabase.table("chat_rooms").select(
+                "room_id, title, created_at, updated_at"
+            ).eq("user_id", user_id).order("updated_at", desc=True).execute()
+            
+            rooms_data = []
+            
+            for room in (rooms_response.data or []):
+                room_id = room.get("room_id")
+                
+                # Get messages for this room (last 50 messages)
+                messages_response = self.supabase.table("chat_history").select(
+                    "message_id, role, content, intent, created_at"
+                ).eq("conversation_id", room_id).order("created_at", desc=False).limit(50).execute()
+                
+                messages = [
+                    {
+                        "message_id": str(msg.get("message_id")),
+                        "role": msg.get("role", ""),
+                        "content": msg.get("content", ""),
+                        "intent": msg.get("intent"),
+                        "created_at": msg.get("created_at")
+                    }
+                    for msg in (messages_response.data or [])
+                ]
+                
+                # Get total message count for this room
+                count_response = self.supabase.table("chat_history").select(
+                    "message_id", count="exact"
+                ).eq("conversation_id", room_id).execute()
+                
+                rooms_data.append({
+                    "room_id": room_id,
+                    "title": room.get("title"),
+                    "created_at": room.get("created_at"),
+                    "updated_at": room.get("updated_at"),
+                    "message_count": count_response.count or 0,
+                    "messages": messages
+                })
+            
+            return {
+                "EC": 0,
+                "EM": "Success",
+                "data": {
+                    "user_id": user_id,
+                    "total_rooms": len(rooms_data),
+                    "rooms": rooms_data
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting user chat history {user_id}: {str(e)}", exc_info=True)
+            return {
+                "EC": 2,
+                "EM": f"Error retrieving user chat history: {str(e)}",
+                "data": None
+            }
 
 
 def get_admin_user_service() -> AdminUserService:

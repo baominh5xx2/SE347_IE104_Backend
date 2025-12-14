@@ -178,3 +178,40 @@ class AdminUserSummaryResponse(BaseModel):
     EC: int = Field(0, description="Error code")
     EM: str = Field("Success", description="Error message")
     data: AdminUserSummaryData
+
+
+# ============================================
+# CHAT HISTORY SCHEMAS
+# ============================================
+
+class ChatMessage(BaseModel):
+    """Single chat message"""
+    message_id: str = Field(..., description="Message ID")
+    role: str = Field(..., description="Message role (user/assistant)")
+    content: str = Field(..., description="Message content")
+    intent: Optional[str] = Field(None, description="Message intent")
+    created_at: datetime = Field(..., description="Message timestamp")
+
+
+class ChatRoom(BaseModel):
+    """Chat room with messages"""
+    room_id: str = Field(..., description="Chat room ID")
+    title: Optional[str] = Field(None, description="Room title")
+    created_at: datetime = Field(..., description="Room creation time")
+    updated_at: Optional[datetime] = Field(None, description="Last update time")
+    message_count: int = Field(0, description="Total messages in room")
+    messages: List[ChatMessage] = Field(default_factory=list, description="Recent messages (last 50)")
+
+
+class AdminUserChatHistoryData(BaseModel):
+    """Chat history data for admin"""
+    user_id: str = Field(..., description="User ID")
+    total_rooms: int = Field(0, description="Total chat rooms")
+    rooms: List[ChatRoom] = Field(default_factory=list, description="Chat rooms with messages")
+
+
+class AdminUserChatHistoryResponse(BaseModel):
+    """Response for get user chat history"""
+    EC: int = Field(0, description="Error code")
+    EM: str = Field("Success", description="Error message")
+    data: AdminUserChatHistoryData

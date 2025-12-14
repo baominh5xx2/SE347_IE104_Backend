@@ -13,7 +13,8 @@ from ...schema.admin_user_schema import (
     AdminUserBookingsResponse,
     AdminUserStatusPatchRequest,
     AdminUserStatusResponse,
-    AdminUserSummaryResponse
+    AdminUserSummaryResponse,
+    AdminUserChatHistoryResponse
 )
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,35 @@ async def get_user_summary(
     if result["EC"] == 1:
         raise HTTPException(status_code=404, detail=result["EM"])
     elif result["EC"] != 0:
+        raise HTTPException(status_code=500, detail=result["EM"])
+    
+    return result
+
+
+@router.get("/{user_id}/chat-history", response_model=AdminUserChatHistoryResponse)
+async def get_user_chat_history(
+    user_id: str,
+    current_admin: Dict[str, Any] = Depends(get_current_admin),
+    service: AdminUserService = Depends(get_admin_user_service)
+):
+    """
+    Get user's chat history grouped by chat rooms (admin only)
+    
+    Args:
+        user_id: User ID
+        current_admin: Current admin user from JWT
+        service: AdminUserService instance
+        
+    Returns:
+        Chat history grouped by rooms with last 50 messages per room
+        
+    Raises:
+        404: User not found
+        403: Not admin
+    """
+    result = service.get_user_chat_history(user_id)
+    
+    if result["EC"] != 0:
         raise HTTPException(status_code=500, detail=result["EM"])
     
     return result
