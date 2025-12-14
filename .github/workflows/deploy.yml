@@ -27,7 +27,7 @@ jobs:
             
             # Ensure project root directory exists
             mkdir -p "$PROJECT_DIR"
-            cd "$PROJECT_DIR"
+              cd "$PROJECT_DIR"
             
             # Clone or update Backend repository into Backend/ subfolder
             if [ ! -d "$BACKEND_DIR" ]; then

@@ -16,7 +16,7 @@ llm:
   temperature: 0.3
   max_tokens: 256
   streaming: true
-  #reasoning: {"effort": "none"}
+  reasoning: {"effort": "low"}
 
 # Agents Configuration
 agents:
