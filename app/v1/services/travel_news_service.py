@@ -198,6 +198,7 @@ class TravelNewsService:
             )
 
             data = data_result.data or []
+            total_pages = (total + limit - 1) // limit if limit > 0 else 0
 
             return {
                 "success": True,
@@ -205,6 +206,7 @@ class TravelNewsService:
                 "page": page,
                 "limit": limit,
                 "total": total,
+                "total_pages": total_pages,
             }
 
         except Exception as e:
@@ -216,6 +218,107 @@ class TravelNewsService:
                 "page": page,
                 "limit": limit,
                 "total": 0,
+            }
+
+    def search_travel_news(
+        self,
+        keywords: str,
+        source_type: Optional[str] = None,
+        page: int = 1,
+        limit: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Search travel news theo keywords trong title với pagination.
+        
+        Args:
+            keywords: Keywords để search (sẽ split thành các từ riêng lẻ)
+            source_type: Filter theo loại ('news' hoặc 'guide')
+            page: Page number (bắt đầu từ 1)
+            limit: Số items per page
+            
+        Returns:
+            Dict với search results và pagination info
+        """
+        offset = max(page - 1, 0) * limit
+        
+        try:
+            # Split keywords thành các từ riêng lẻ và loại bỏ empty strings
+            keyword_list = [kw.strip() for kw in keywords.split() if kw.strip()]
+            
+            if not keyword_list:
+                return {
+                    "success": False,
+                    "error": "Keywords cannot be empty",
+                    "data": [],
+                    "page": page,
+                    "limit": limit,
+                    "total": 0,
+                    "total_pages": 0,
+                }
+            
+            # Build base query
+            query = self.supabase.table("travel_news_urls").select("*", count="exact")
+            
+            # Apply source_type filter nếu có
+            if source_type:
+                query = query.eq("source_type", source_type)
+            
+            # Build OR conditions cho mỗi keyword trên field title
+            # Supabase Python client hỗ trợ .or() với format: "column.ilike.pattern,column.ilike.pattern"
+            or_conditions = []
+            for keyword in keyword_list:
+                or_conditions.append(f"title.ilike.%{keyword}%")
+            
+            # Apply OR filter cho title search
+            if or_conditions:
+                # Supabase .or() method expects a string with comma-separated conditions
+                or_filter = ",".join(or_conditions)
+                query = query.or_(or_filter)
+            
+            # Get total count
+            count_result = query.execute()
+            total = count_result.count if hasattr(count_result, "count") else 0
+            total_pages = (total + limit - 1) // limit if limit > 0 else 0
+            
+            # Build data query với same filters
+            data_query = self.supabase.table("travel_news_urls").select("*")
+            
+            if source_type:
+                data_query = data_query.eq("source_type", source_type)
+            
+            if or_conditions:
+                or_filter = ",".join(or_conditions)
+                data_query = data_query.or_(or_filter)
+            
+            # Apply pagination và ordering
+            data_result = (
+                data_query.order("created_at", desc=True)
+                .limit(limit)
+                .offset(offset)
+                .execute()
+            )
+            
+            data = data_result.data or []
+            
+            return {
+                "success": True,
+                "data": data,
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": total_pages,
+            }
+            
+        except Exception as e:
+            logger.error(f"Error searching travel news: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "data": [],
+                "page": page,
+                "limit": limit,
+                "total": 0,
+                "total_pages": 0,
             }
 
     def get_today_travel_news(

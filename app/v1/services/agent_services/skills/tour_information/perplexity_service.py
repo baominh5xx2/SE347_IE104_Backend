@@ -78,13 +78,13 @@ class PerplexityService:
                     chat_resp = await loop.run_in_executor(
                         executor,
                         lambda: Perplexity(api_key=self.api_key).chat.completions.create(
-                            model="sonar-pro",
+                            model="sonar",
                             messages=[
                                 {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": user_prompt}
                             ],
                             temperature=0.3,
-                            max_tokens=400
+                            max_tokens=128
                         )
                     )
                     
@@ -141,7 +141,7 @@ class PerplexityService:
                     return client.search.create(
                         query=query,
                         country="VN",  # Vietnamese results
-                        max_results=5
+                        max_results=1
                     )
                 
                 search = await loop.run_in_executor(executor, run_search)
