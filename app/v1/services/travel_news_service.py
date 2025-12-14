@@ -66,7 +66,7 @@ class TravelNewsService:
         return client.search.create(
             query=enhanced_query,
             country="VN",  # Ưu tiên kết quả tại Việt Nam
-            max_results=5,  # Tăng từ 10 lên 15 để lấy nhiều kết quả hơn
+            max_results=20,  # Tăng từ 10 lên 15 để lấy nhiều kết quả hơn
         )
 
     async def search_and_save_travel_news(self, use_detailed_prompt: bool = True) -> Dict[str, Any]:
