@@ -322,6 +322,36 @@ class AuthService:
             logger.error(f"Error getting user role for {user_id}: {str(e)}")
             return None
     
+    def get_user_status(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get user role and active status from database
+        
+        Args:
+            user_id: UUID of the user
+            
+        Returns:
+            Dict with role and is_active, or None if user doesn't exist
+        """
+        try:
+            result = self.supabase.table('users') \
+                .select('role, is_active') \
+                .eq('user_id', user_id) \
+                .execute()
+            
+            if not result.data:
+                logger.warning(f"User {user_id} not found")
+                return None
+            
+            user = result.data[0]
+            return {
+                'role': user.get('role', 'user'),
+                'is_active': user.get('is_active', True)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting user status for {user_id}: {str(e)}")
+            return None
+    
     async def register_admin(
         self,
         full_name: str,
