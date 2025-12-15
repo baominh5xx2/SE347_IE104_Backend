@@ -46,9 +46,11 @@ class Settings(BaseSettings):
     TOKEN_ENCRYPTION_KEY: str = ""
     
     # Google OAuth Configuration
+    # NOTE: Nếu dùng ngrok, cập nhật GOOGLE_REDIRECT_URI trong .env thành ngrok URL
+    # và thêm URL đó vào Google Cloud Console > Credentials > OAuth 2.0 Client > Authorized redirect URIs
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
-    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/google/callback"
+    GOOGLE_REDIRECT_URI: str = ""
     
     # Admin Configuration
     ADMIN_SECRET_KEY: str = ""  # Secret key để tạo admin mới (optional, để trống nếu không cần)
