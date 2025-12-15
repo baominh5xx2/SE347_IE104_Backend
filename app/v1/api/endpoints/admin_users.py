@@ -15,12 +15,55 @@ from ...schema.admin_user_schema import (
     AdminUserStatusResponse,
     AdminUserSummaryResponse,
     AdminUserChatHistoryResponse,
-    AdminUsersListResponse
+    AdminUsersListResponse,
+    AdminDeleteUserResponse,
+    AdminCreateUserRequest,
+    AdminCreateUserResponse,
+    AdminUpdateUserRequest,
+    AdminUpdateUserResponse
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post("", response_model=AdminCreateUserResponse)
+async def create_user(
+    request: AdminCreateUserRequest,
+    current_admin: Dict[str, Any] = Depends(get_current_admin),
+    service: AdminUserService = Depends(get_admin_user_service)
+):
+    """
+    Create a new user (admin only)
+    
+    Args:
+        request: User creation request data
+        current_admin: Current admin user from JWT
+        service: AdminUserService instance
+        
+    Returns:
+        Created user information (including generated password if auto-generated)
+        
+    Raises:
+        400: Email already exists or invalid data
+        403: Not admin
+    """
+    result = service.create_user(
+        email=request.email,
+        full_name=request.full_name,
+        phone_number=request.phone_number,
+        password=request.password,
+        role=request.role,
+        is_active=request.is_active
+    )
+    
+    if result["EC"] == 1:
+        raise HTTPException(status_code=400, detail=result["EM"])
+    elif result["EC"] != 0:
+        raise HTTPException(status_code=500, detail=result["EM"])
+    
+    return result
 
 
 @router.get("", response_model=AdminUsersListResponse)
@@ -231,6 +274,85 @@ async def get_user_chat_history(
     result = service.get_user_chat_history(user_id)
     
     if result["EC"] != 0:
+        raise HTTPException(status_code=500, detail=result["EM"])
+    
+    return result
+
+
+@router.put("/{user_id}", response_model=AdminUpdateUserResponse)
+async def update_user(
+    user_id: str,
+    request: AdminUpdateUserRequest,
+    current_admin: Dict[str, Any] = Depends(get_current_admin),
+    service: AdminUserService = Depends(get_admin_user_service)
+):
+    """
+    Update user information (admin only)
+    
+    Args:
+        user_id: User ID to update
+        request: User update request data
+        current_admin: Current admin user from JWT
+        service: AdminUserService instance
+        
+    Returns:
+        Updated user information
+        
+    Raises:
+        404: User not found
+        400: Email already exists or invalid data
+        403: Not admin
+    """
+    result = service.update_user(
+        user_id=user_id,
+        email=request.email,
+        full_name=request.full_name,
+        phone_number=request.phone_number,
+        role=request.role,
+        is_active=request.is_active,
+        password=request.password
+    )
+    
+    if result["EC"] == 1:
+        raise HTTPException(status_code=404, detail=result["EM"])
+    elif result["EC"] == 2:
+        raise HTTPException(status_code=400, detail=result["EM"])
+    elif result["EC"] != 0:
+        raise HTTPException(status_code=500, detail=result["EM"])
+    
+    return result
+
+
+@router.delete("/{user_id}", response_model=AdminDeleteUserResponse)
+async def delete_user(
+    user_id: str,
+    current_admin: Dict[str, Any] = Depends(get_current_admin),
+    service: AdminUserService = Depends(get_admin_user_service)
+):
+    """
+    Delete user by ID (admin only)
+    Only allows deletion if user has no related records (bookings, payments, reviews, chat_rooms)
+    
+    Args:
+        user_id: User ID to delete
+        current_admin: Current admin user from JWT
+        service: AdminUserService instance
+        
+    Returns:
+        Deleted user information
+        
+    Raises:
+        404: User not found
+        400: User has related records (cannot delete)
+        403: Not admin
+    """
+    result = service.delete_user(user_id)
+    
+    if result["EC"] == 1:
+        raise HTTPException(status_code=404, detail=result["EM"])
+    elif result["EC"] == 3:
+        raise HTTPException(status_code=400, detail=result["EM"])
+    elif result["EC"] != 0:
         raise HTTPException(status_code=500, detail=result["EM"])
     
     return result
