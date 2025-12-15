@@ -3,8 +3,9 @@ Admin User Management Service
 Business logic for admin customer management operations
 """
 import logging
+import bcrypt
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from supabase import Client
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,21 @@ class AdminUserService:
     
     def __init__(self, supabase: Client):
         self.supabase = supabase
+        self.salt_rounds = 10
+    
+    def _hash_password(self, password: str) -> str:
+        """
+        Hash password using bcrypt
+        
+        Args:
+            password: Plain text password
+            
+        Returns:
+            str: Hashed password
+        """
+        salt = bcrypt.gensalt(rounds=self.salt_rounds)
+        hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+        return hashed.decode('utf-8')
     
     def get_user_profile(self, user_id: str) -> Dict[str, Any]:
         """
@@ -459,6 +475,322 @@ class AdminUserService:
             return {
                 "EC": 2,
                 "EM": f"Error retrieving users: {str(e)}",
+                "data": None
+            }
+    
+    def delete_user(self, user_id: str) -> Dict[str, Any]:
+        """
+        Delete user by ID (admin only)
+        Only allows deletion if user has no related records (bookings, payments, reviews, chat_rooms)
+        
+        Args:
+            user_id: User ID to delete
+            
+        Returns:
+            Dict with EC, EM, data keys
+        """
+        try:
+            # First, check if user exists
+            user_response = self.supabase.table("users").select("user_id, email, full_name").eq("user_id", user_id).execute()
+            
+            if not user_response.data or len(user_response.data) == 0:
+                return {
+                    "EC": 1,
+                    "EM": "User not found",
+                    "data": None
+                }
+            
+            user = user_response.data[0]
+            
+            # Check for related records that would violate foreign key constraints
+            # 1. Check bookings
+            bookings_response = self.supabase.table("bookings").select("booking_id", count="exact").eq("user_id", user_id).limit(1).execute()
+            bookings_count = bookings_response.count if hasattr(bookings_response, 'count') else len(bookings_response.data or [])
+            
+            if bookings_count > 0:
+                return {
+                    "EC": 3,
+                    "EM": f"Cannot delete user: User has {bookings_count} booking(s). Please cancel or complete all bookings first.",
+                    "data": None
+                }
+            
+            # 2. Check payments
+            payments_response = self.supabase.table("payments").select("payment_id", count="exact").eq("user_id", user_id).limit(1).execute()
+            payments_count = payments_response.count if hasattr(payments_response, 'count') else len(payments_response.data or [])
+            
+            if payments_count > 0:
+                return {
+                    "EC": 3,
+                    "EM": f"Cannot delete user: User has {payments_count} payment record(s). Please resolve all payment records first.",
+                    "data": None
+                }
+            
+            # 3. Check reviews
+            reviews_response = self.supabase.table("reviews").select("review_id", count="exact").eq("user_id", user_id).limit(1).execute()
+            reviews_count = reviews_response.count if hasattr(reviews_response, 'count') else len(reviews_response.data or [])
+            
+            if reviews_count > 0:
+                return {
+                    "EC": 3,
+                    "EM": f"Cannot delete user: User has {reviews_count} review(s). Please delete all reviews first.",
+                    "data": None
+                }
+            
+            # 4. Check chat_rooms
+            chat_rooms_response = self.supabase.table("chat_rooms").select("room_id", count="exact").eq("user_id", user_id).limit(1).execute()
+            chat_rooms_count = chat_rooms_response.count if hasattr(chat_rooms_response, 'count') else len(chat_rooms_response.data or [])
+            
+            if chat_rooms_count > 0:
+                return {
+                    "EC": 3,
+                    "EM": f"Cannot delete user: User has {chat_rooms_count} chat room(s). Please delete all chat rooms first.",
+                    "data": None
+                }
+            
+            # 5. Check otp_verifications (optional, but good to check)
+            otp_response = self.supabase.table("otp_verifications").select("otp_id", count="exact").eq("user_id", user_id).limit(1).execute()
+            otp_count = otp_response.count if hasattr(otp_response, 'count') else len(otp_response.data or [])
+            
+            if otp_count > 0:
+                return {
+                    "EC": 3,
+                    "EM": f"Cannot delete user: User has {otp_count} OTP verification record(s). Please resolve all OTP records first.",
+                    "data": None
+                }
+            
+            # All checks passed - safe to delete
+            delete_response = self.supabase.table("users").delete().eq("user_id", user_id).execute()
+            
+            if not delete_response.data:
+                return {
+                    "EC": 2,
+                    "EM": "Failed to delete user",
+                    "data": None
+                }
+            
+            logger.info(f"Admin deleted user {user_id} ({user.get('email', 'N/A')})")
+            
+            return {
+                "EC": 0,
+                "EM": "User deleted successfully",
+                "data": {
+                    "user_id": user_id,
+                    "email": user.get("email"),
+                    "full_name": user.get("full_name")
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error deleting user {user_id}: {str(e)}", exc_info=True)
+            return {
+                "EC": 2,
+                "EM": f"Error deleting user: {str(e)}",
+                "data": None
+            }
+    
+    def create_user(
+        self,
+        email: str,
+        full_name: Optional[str] = None,
+        phone_number: Optional[str] = None,
+        password: Optional[str] = None,
+        role: str = "user",
+        is_active: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Create a new user (admin only)
+        
+        Args:
+            email: User email (required, must be unique)
+            full_name: User full name (optional)
+            phone_number: User phone number (optional)
+            password: User password (optional, will generate random if not provided)
+            role: User role (default: "user", can be "user" or "admin")
+            is_active: Account active status (default: True)
+            
+        Returns:
+            Dict with EC, EM, data keys
+        """
+        try:
+            # Check if email already exists
+            existing_user = self.supabase.table("users").select("user_id, email").eq("email", email).execute()
+            
+            if existing_user.data and len(existing_user.data) > 0:
+                return {
+                    "EC": 1,
+                    "EM": "Email already exists",
+                    "data": None
+                }
+            
+            # Generate random password if not provided
+            import secrets
+            import string
+            if not password:
+                # Generate random 12-character password
+                alphabet = string.ascii_letters + string.digits
+                password = ''.join(secrets.choice(alphabet) for i in range(12))
+            
+            # Hash password
+            hashed_password = self._hash_password(password)
+            
+            # Create user
+            current_time = datetime.now(timezone.utc).isoformat()
+            user_data = {
+                "email": email,
+                "full_name": full_name or email.split('@')[0],  # Use email prefix if no name provided
+                "phone_number": phone_number,
+                "password_hash": hashed_password,
+                "role": role,
+                "is_active": is_active,
+                "is_activate": is_active,  # Legacy field
+                "login_type": "TRADITIONAL",
+                "security_2fa_enabled": False,
+                "created_at": current_time,
+                "updated_at": current_time,
+                "last_access_time": None
+            }
+            
+            result = self.supabase.table("users").insert(user_data).execute()
+            
+            if not result.data or len(result.data) == 0:
+                return {
+                    "EC": 2,
+                    "EM": "Failed to create user",
+                    "data": None
+                }
+            
+            user = result.data[0]
+            logger.info(f"Admin created user {user['user_id']} ({email})")
+            
+            return {
+                "EC": 0,
+                "EM": "User created successfully",
+                "data": {
+                    "user_id": str(user["user_id"]),
+                    "email": user.get("email"),
+                    "full_name": user.get("full_name"),
+                    "phone_number": user.get("phone_number"),
+                    "role": user.get("role", "user"),
+                    "is_active": user.get("is_active", True),
+                    "password": password  # Return generated password for admin to share with user
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating user: {str(e)}", exc_info=True)
+            return {
+                "EC": 2,
+                "EM": f"Error creating user: {str(e)}",
+                "data": None
+            }
+    
+    def update_user(
+        self,
+        user_id: str,
+        email: Optional[str] = None,
+        full_name: Optional[str] = None,
+        phone_number: Optional[str] = None,
+        role: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        password: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Update user information (admin only)
+        
+        Args:
+            user_id: User ID to update
+            email: New email (optional, must be unique if provided)
+            full_name: New full name (optional)
+            phone_number: New phone number (optional)
+            role: New role (optional, must be "user" or "admin")
+            is_active: New active status (optional)
+            password: New password (optional, will be hashed)
+            
+        Returns:
+            Dict with EC, EM, data keys
+        """
+        try:
+            # Check if user exists
+            user_response = self.supabase.table("users").select("user_id, email").eq("user_id", user_id).execute()
+            
+            if not user_response.data or len(user_response.data) == 0:
+                return {
+                    "EC": 1,
+                    "EM": "User not found",
+                    "data": None
+                }
+            
+            # Check if email is being changed and if new email already exists
+            if email:
+                existing_user = self.supabase.table("users").select("user_id, email").eq("email", email).execute()
+                if existing_user.data:
+                    existing_user_id = str(existing_user.data[0]["user_id"])
+                    if existing_user_id != user_id:
+                        return {
+                            "EC": 1,
+                            "EM": "Email already exists",
+                            "data": None
+                        }
+            
+            # Validate role if provided
+            if role and role not in ["user", "admin"]:
+                return {
+                    "EC": 2,
+                    "EM": "Invalid role. Must be 'user' or 'admin'",
+                    "data": None
+                }
+            
+            # Build update data
+            update_data = {
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            if email is not None:
+                update_data["email"] = email
+            if full_name is not None:
+                update_data["full_name"] = full_name
+            if phone_number is not None:
+                update_data["phone_number"] = phone_number
+            if role is not None:
+                update_data["role"] = role
+            if is_active is not None:
+                update_data["is_active"] = is_active
+                update_data["is_activate"] = is_active  # Legacy field
+            if password is not None:
+                update_data["password_hash"] = self._hash_password(password)
+            
+            # Update user
+            result = self.supabase.table("users").update(update_data).eq("user_id", user_id).execute()
+            
+            if not result.data or len(result.data) == 0:
+                return {
+                    "EC": 2,
+                    "EM": "Failed to update user",
+                    "data": None
+                }
+            
+            updated_user = result.data[0]
+            logger.info(f"Admin updated user {user_id}")
+            
+            return {
+                "EC": 0,
+                "EM": "User updated successfully",
+                "data": {
+                    "user_id": str(updated_user["user_id"]),
+                    "email": updated_user.get("email"),
+                    "full_name": updated_user.get("full_name"),
+                    "phone_number": updated_user.get("phone_number"),
+                    "role": updated_user.get("role", "user"),
+                    "is_active": updated_user.get("is_active", True),
+                    "updated_at": updated_user.get("updated_at")
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error updating user {user_id}: {str(e)}", exc_info=True)
+            return {
+                "EC": 2,
+                "EM": f"Error updating user: {str(e)}",
                 "data": None
             }
 

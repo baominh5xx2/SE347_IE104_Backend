@@ -264,3 +264,118 @@ class AdminUsersListResponse(BaseModel):
     EC: int = Field(0, description="Error code")
     EM: str = Field("Success", description="Error message")
     data: AdminUsersListData
+
+
+# ============================================
+# DELETE USER SCHEMAS
+# ============================================
+
+class AdminDeleteUserData(BaseModel):
+    """Data for delete user response"""
+    user_id: str = Field(..., description="Deleted user ID")
+    email: Optional[str] = Field(None, description="Deleted user email")
+    full_name: Optional[str] = Field(None, description="Deleted user full name")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "user_id": "9b3d0691-eccd-4a81-9f43-383f5be344b8",
+                "email": "user@example.com",
+                "full_name": "Nguyễn Văn A"
+            }
+        }
+
+
+class AdminDeleteUserResponse(BaseModel):
+    """Response for delete user"""
+    EC: int = Field(0, description="Error code")
+    EM: str = Field("Success", description="Error message")
+    data: AdminDeleteUserData
+
+
+# ============================================
+# CREATE USER SCHEMAS
+# ============================================
+
+class AdminCreateUserRequest(BaseModel):
+    """Request body for creating a new user"""
+    email: str = Field(..., description="User email (must be unique)")
+    full_name: Optional[str] = Field(None, description="User full name")
+    phone_number: Optional[str] = Field(None, description="User phone number")
+    password: Optional[str] = Field(None, min_length=6, description="User password (optional, will generate random if not provided)")
+    role: str = Field("user", description="User role (user or admin)")
+    is_active: bool = Field(True, description="Account active status")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "email": "newuser@example.com",
+                "full_name": "Nguyễn Văn B",
+                "phone_number": "0901234567",
+                "password": "password123",
+                "role": "user",
+                "is_active": True
+            }
+        }
+
+
+class AdminCreateUserData(BaseModel):
+    """Data for create user response"""
+    user_id: str = Field(..., description="Created user ID")
+    email: str = Field(..., description="User email")
+    full_name: Optional[str] = Field(None, description="User full name")
+    phone_number: Optional[str] = Field(None, description="User phone number")
+    role: str = Field(..., description="User role")
+    is_active: bool = Field(..., description="Account active status")
+    password: Optional[str] = Field(None, description="Generated password (only returned if password was auto-generated)")
+
+
+class AdminCreateUserResponse(BaseModel):
+    """Response for create user"""
+    EC: int = Field(0, description="Error code")
+    EM: str = Field("Success", description="Error message")
+    data: AdminCreateUserData
+
+
+# ============================================
+# UPDATE USER SCHEMAS
+# ============================================
+
+class AdminUpdateUserRequest(BaseModel):
+    """Request body for updating user information"""
+    email: Optional[str] = Field(None, description="New email (must be unique if provided)")
+    full_name: Optional[str] = Field(None, description="New full name")
+    phone_number: Optional[str] = Field(None, description="New phone number")
+    role: Optional[str] = Field(None, description="New role (user or admin)")
+    is_active: Optional[bool] = Field(None, description="New active status")
+    password: Optional[str] = Field(None, min_length=6, description="New password (optional)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "email": "updated@example.com",
+                "full_name": "Nguyễn Văn C",
+                "phone_number": "0987654321",
+                "role": "user",
+                "is_active": True,
+                "password": "newpassword123"
+            }
+        }
+
+
+class AdminUpdateUserData(BaseModel):
+    """Data for update user response"""
+    user_id: str = Field(..., description="Updated user ID")
+    email: str = Field(..., description="User email")
+    full_name: Optional[str] = Field(None, description="User full name")
+    phone_number: Optional[str] = Field(None, description="User phone number")
+    role: str = Field(..., description="User role")
+    is_active: bool = Field(..., description="Account active status")
+    updated_at: Optional[datetime] = Field(None, description="Last update time")
+
+
+class AdminUpdateUserResponse(BaseModel):
+    """Response for update user"""
+    EC: int = Field(0, description="Error code")
+    EM: str = Field("Success", description="Error message")
+    data: AdminUpdateUserData
