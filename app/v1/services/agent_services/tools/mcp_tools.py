@@ -26,7 +26,8 @@ from app.v1.mcp.src.schema import (
     UpdateBookingInput,
     DeleteBookingInput,
     VerifyOTPInput,
-    CreatePaymentInput
+    CreatePaymentInput,
+    ApplyPromotionCodeInput
 )
 
 logger = logging.getLogger(__name__)
@@ -288,6 +289,31 @@ class BookingToolHandler:
         except Exception as e:
             logger.error(f"Error in create_payment: {e}")
             return {"success": False, "error": f"Failed to create payment: {str(e)}"}
+        
+        if result is None:
+            return {"success": False, "error": "No response from MCP server"}
+        
+        return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
+    
+    def apply_promotion_code(
+        self,
+        booking_id: str,
+        promotion_code: str
+    ) -> Dict[str, Any]:
+        """Apply promotion code to existing booking"""
+        try:
+            params = {
+                "booking_id": booking_id,
+                "promotion_code": promotion_code
+            }
+            
+            result = self.mcp_client.call_tool_sync("apply_promotion_code", params)
+        except concurrent.futures.TimeoutError:
+            logger.error("apply_promotion_code timeout")
+            return {"success": False, "error": "Request timeout"}
+        except Exception as e:
+            logger.error(f"Error in apply_promotion_code: {e}")
+            return {"success": False, "error": f"Failed to apply promotion code: {str(e)}"}
         
         if result is None:
             return {"success": False, "error": "No response from MCP server"}
@@ -619,6 +645,21 @@ class MCPToolFactory:
             args_schema=CreatePaymentInput
         )
     
+    def apply_promotion_code_tool(self) -> StructuredTool:
+        """Create StructuredTool for apply_promotion_code"""
+        return StructuredTool.from_function(
+            func=self.booking_handler.apply_promotion_code,
+            name="apply_promotion_code",
+            description=(
+                "Áp dụng mã khuyến mãi (promotion code) vào booking đã tạo. "
+                "Gọi tool này khi user cung cấp mã giảm giá sau khi booking đã được tạo (status='pending', sau khi verify OTP). "
+                "Tool sẽ validate mã khuyến mãi, tính discount, và cập nhật total_amount của booking. "
+                "Sau khi áp dụng thành công, booking sẽ có giá mới (đã giảm) và có thể thanh toán với giá đã giảm. "
+                "LƯU Ý: Chỉ áp dụng được cho booking có status='pending' (chưa thanh toán)."
+            ),
+            args_schema=ApplyPromotionCodeInput
+        )
+    
     # Search Tools
     def search_tour_packages_tool(self) -> StructuredTool:
         """Create StructuredTool for search_tour_packages"""
@@ -784,6 +825,12 @@ def verify_otp_and_confirm_booking_tool() -> StructuredTool:
 
 def create_payment_tool() -> StructuredTool:
     return _tool_factory.create_payment_tool()
+
+def apply_promotion_code_sync(*args, **kwargs):
+    return _tool_factory.booking_handler.apply_promotion_code(*args, **kwargs)
+
+def apply_promotion_code_tool() -> StructuredTool:
+    return _tool_factory.apply_promotion_code_tool()
 
 def search_tour_packages_tool() -> StructuredTool:
     return _tool_factory.search_tour_packages_tool()

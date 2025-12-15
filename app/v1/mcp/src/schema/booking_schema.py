@@ -68,3 +68,9 @@ class CreatePaymentInput(BaseModel):
         default=None,
         description="Optional: URL frontend sẽ quay về sau thanh toán (append vào VNPAY_RETURN_URL)"
     )
+
+
+class ApplyPromotionCodeInput(BaseModel):
+    """Input schema for apply_promotion_code tool"""
+    booking_id: str = Field(..., description="Booking ID cần áp dụng mã giảm giá")
+    promotion_code: str = Field(..., min_length=1, max_length=20, description="Mã khuyến mãi (ví dụ: ABC12345)")
