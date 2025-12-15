@@ -14,12 +14,39 @@ from ...schema.admin_user_schema import (
     AdminUserStatusPatchRequest,
     AdminUserStatusResponse,
     AdminUserSummaryResponse,
-    AdminUserChatHistoryResponse
+    AdminUserChatHistoryResponse,
+    AdminUsersListResponse
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.get("", response_model=AdminUsersListResponse)
+async def get_all_users(
+    current_admin: Dict[str, Any] = Depends(get_current_admin),
+    service: AdminUserService = Depends(get_admin_user_service)
+):
+    """
+    Get all users in the database (admin only)
+    
+    Args:
+        current_admin: Current admin user from JWT
+        service: AdminUserService instance
+        
+    Returns:
+        List of all users with last_access_time
+        
+    Raises:
+        403: Not admin
+    """
+    result = service.get_all_users()
+    
+    if result["EC"] != 0:
+        raise HTTPException(status_code=500, detail=result["EM"])
+    
+    return result
 
 
 @router.get("/{user_id}", response_model=AdminUserProfileResponse)

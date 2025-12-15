@@ -19,6 +19,7 @@ class AdminUserProfile(BaseModel):
     is_active: bool = Field(..., description="Account active status")
     created_at: datetime = Field(..., description="Account creation time")
     updated_at: Optional[datetime] = Field(None, description="Last update time")
+    last_access_time: Optional[datetime] = Field(None, description="Last access time")
 
     class Config:
         json_schema_extra = {
@@ -31,7 +32,8 @@ class AdminUserProfile(BaseModel):
                 "role": "user",
                 "is_active": True,
                 "created_at": "2025-12-01T10:00:00Z",
-                "updated_at": "2025-12-10T15:30:00Z"
+                "updated_at": "2025-12-10T15:30:00Z",
+                "last_access_time": "2025-12-15T08:30:00Z"
             }
         }
 
@@ -215,3 +217,50 @@ class AdminUserChatHistoryResponse(BaseModel):
     EC: int = Field(0, description="Error code")
     EM: str = Field("Success", description="Error message")
     data: AdminUserChatHistoryData
+
+
+# ============================================
+# GET ALL USERS SCHEMAS
+# ============================================
+
+class AdminUserListItem(BaseModel):
+    """Single user item in list"""
+    user_id: str = Field(..., description="User ID")
+    email: str = Field(..., description="User email")
+    full_name: Optional[str] = Field(None, description="User full name")
+    phone_number: Optional[str] = Field(None, description="User phone number")
+    profile_picture: Optional[str] = Field(None, description="Profile picture URL")
+    role: str = Field(..., description="User role")
+    is_active: bool = Field(..., description="Account active status")
+    created_at: datetime = Field(..., description="Account creation time")
+    updated_at: Optional[datetime] = Field(None, description="Last update time")
+    last_access_time: Optional[datetime] = Field(None, description="Last access time")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "user_id": "9b3d0691-eccd-4a81-9f43-383f5be344b8",
+                "email": "user@example.com",
+                "full_name": "Nguyễn Văn A",
+                "phone_number": "0901234567",
+                "profile_picture": "https://...",
+                "role": "user",
+                "is_active": True,
+                "created_at": "2025-12-01T10:00:00Z",
+                "updated_at": "2025-12-10T15:30:00Z",
+                "last_access_time": "2025-12-15T08:30:00Z"
+            }
+        }
+
+
+class AdminUsersListData(BaseModel):
+    """Data for get all users"""
+    users: List[AdminUserListItem] = Field(..., description="List of all users")
+    total: int = Field(..., ge=0, description="Total number of users")
+
+
+class AdminUsersListResponse(BaseModel):
+    """Response for get all users"""
+    EC: int = Field(0, description="Error code")
+    EM: str = Field("Success", description="Error message")
+    data: AdminUsersListData

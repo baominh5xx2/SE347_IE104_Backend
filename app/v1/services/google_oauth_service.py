@@ -186,7 +186,8 @@ class GoogleOAuthService:
                     "google_id": google_user.get('google_id'),
                     "profile_picture": google_user.get('picture'),
                     "login_type": "GOOGLE",
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "last_access_time": datetime.now(timezone.utc).isoformat()
                 }
                 
                 self.supabase.table('users').update(update_data).eq('user_id', user['user_id']).execute()
@@ -224,6 +225,7 @@ class GoogleOAuthService:
                 }
             else:
                 # User doesn't exist - create new account
+                current_time = datetime.now(timezone.utc).isoformat()
                 new_user = {
                     "full_name": google_user.get('full_name') or google_user.get('email').split('@')[0],
                     "email": email,
@@ -233,8 +235,9 @@ class GoogleOAuthService:
                     "login_type": "GOOGLE",
                     "security_2fa_enabled": False,
                     "role": "user",  # Default role for new users
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                    "last_access_time": current_time
                 }
                 
                 create_result = self.supabase.table('users').insert(new_user).execute()
