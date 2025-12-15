@@ -313,7 +313,9 @@ async def _handle_google_callback_logic(
             return RedirectResponse(url="http://localhost:3000/login?error=no_code", status_code=303)
         
         # Handle callback and get login result
+        logger.info("Starting handle_google_callback...")
         result = await google_service.handle_google_callback(code, state)
+        logger.info(f"handle_google_callback completed: EC={result.get('EC')}, has_token={bool(result.get('access_token'))}")
         
         # Return JSON format for testing
         if format == "json":
@@ -321,9 +323,13 @@ async def _handle_google_callback_logic(
         
         # Default: Redirect to frontend
         if result["EC"] == 0:
-            # Success - redirect to frontend with token
+            # Success - redirect to frontend home page with token
             token = result.get("access_token")
-            return RedirectResponse(url=f"http://localhost:3000/auth/callback?token={token}", status_code=303)
+            if not token:
+                logger.error("No access_token in result!")
+                return RedirectResponse(url=f"http://localhost:3000/login?error=no_token", status_code=303)
+            logger.info(f"Redirecting to frontend with token (length: {len(token)})")
+            return RedirectResponse(url=f"http://localhost:3000/home?token={token}", status_code=303)
         else:
             # Error - redirect with error message
             error_msg = result.get("EM", "Login failed")
@@ -339,7 +345,7 @@ async def google_callback(
     code: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
-    format: Optional[str] = Query("json", description="Response format: 'json' (default) or 'redirect'"),
+    format: Optional[str] = Query(None, description="Response format: 'redirect' (default) or 'json'"),
     google_service: GoogleOAuthService = Depends(get_google_oauth_service)
 ):
     """
