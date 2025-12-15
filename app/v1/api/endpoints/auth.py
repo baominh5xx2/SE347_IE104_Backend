@@ -313,7 +313,9 @@ async def _handle_google_callback_logic(
             return RedirectResponse(url="http://localhost:3000/login?error=no_code", status_code=303)
         
         # Handle callback and get login result
+        logger.info("Starting handle_google_callback...")
         result = await google_service.handle_google_callback(code, state)
+        logger.info(f"handle_google_callback completed: EC={result.get('EC')}, has_token={bool(result.get('access_token'))}")
         
         # Return JSON format for testing
         if format == "json":
@@ -323,6 +325,10 @@ async def _handle_google_callback_logic(
         if result["EC"] == 0:
             # Success - redirect to frontend home page with token
             token = result.get("access_token")
+            if not token:
+                logger.error("No access_token in result!")
+                return RedirectResponse(url=f"http://localhost:3000/login?error=no_token", status_code=303)
+            logger.info(f"Redirecting to frontend with token (length: {len(token)})")
             return RedirectResponse(url=f"http://localhost:3000/home?token={token}", status_code=303)
         else:
             # Error - redirect with error message
