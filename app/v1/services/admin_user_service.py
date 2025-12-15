@@ -29,7 +29,7 @@ class AdminUserService:
         try:
             # Query user from database
             response = self.supabase.table("users").select(
-                "user_id, email, full_name, phone_number, profile_picture, role, is_active, created_at, updated_at"
+                "user_id, email, full_name, phone_number, profile_picture, role, is_active, created_at, updated_at, last_access_time"
             ).eq("user_id", user_id).execute()
             
             if not response.data or len(response.data) == 0:
@@ -53,7 +53,8 @@ class AdminUserService:
                     "role": user.get("role", "user"),
                     "is_active": user.get("is_active", True),
                     "created_at": user.get("created_at"),
-                    "updated_at": user.get("updated_at")
+                    "updated_at": user.get("updated_at"),
+                    "last_access_time": user.get("last_access_time")
                 }
             }
         except Exception as e:
@@ -415,6 +416,49 @@ class AdminUserService:
             return {
                 "EC": 2,
                 "EM": f"Error retrieving user chat history: {str(e)}",
+                "data": None
+            }
+    
+    def get_all_users(self) -> Dict[str, Any]:
+        """
+        Get all users in the database (admin only)
+        
+        Returns:
+            Dict with EC, EM, data keys
+        """
+        try:
+            response = self.supabase.table("users").select(
+                "user_id, email, full_name, phone_number, profile_picture, role, is_active, created_at, updated_at, last_access_time"
+            ).order("created_at", desc=True).execute()
+            
+            users = []
+            for user in (response.data or []):
+                users.append({
+                    "user_id": str(user["user_id"]),
+                    "email": user.get("email", ""),
+                    "full_name": user.get("full_name"),
+                    "phone_number": user.get("phone_number"),
+                    "profile_picture": user.get("profile_picture"),
+                    "role": user.get("role", "user"),
+                    "is_active": user.get("is_active", True),
+                    "created_at": user.get("created_at"),
+                    "updated_at": user.get("updated_at"),
+                    "last_access_time": user.get("last_access_time")
+                })
+            
+            return {
+                "EC": 0,
+                "EM": "Success",
+                "data": {
+                    "users": users,
+                    "total": len(users)
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting all users: {str(e)}", exc_info=True)
+            return {
+                "EC": 2,
+                "EM": f"Error retrieving users: {str(e)}",
                 "data": None
             }
 

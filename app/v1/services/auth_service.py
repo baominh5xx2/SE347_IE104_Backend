@@ -227,6 +227,11 @@ class AuthService:
             # Get user role (default to 'user' if not set)
             role = user.get('role', 'user')
             
+            # Update last_access_time
+            self.supabase.table('users').update({
+                "last_access_time": datetime.now(timezone.utc).isoformat()
+            }).eq('user_id', user['user_id']).execute()
+            
             # Generate access token
             access_token = self._generate_access_token({
                 "email": user["email"],
