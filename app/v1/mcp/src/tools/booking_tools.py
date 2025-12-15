@@ -18,8 +18,10 @@ from app.v1.mcp.src.schema import (
     DeleteBookingInput,
     GetUserBookingsInput,
     VerifyOTPInput,
-    CreatePaymentInput
+    CreatePaymentInput,
+    ApplyPromotionCodeInput
 )
+from app.v1.services.promotion_service import PromotionService
 
 # Logger
 logger = logging.getLogger(__name__)
@@ -644,8 +646,35 @@ def register_booking_tools(mcp: FastMCP):
             )
         except Exception as e:
             return {"success": False, "error": f"Error generating payment UI: {str(e)}"}
+
+    @mcp.tool()
+    async def apply_promotion_code(
+        booking_id: str,
+        promotion_code: str
+    ) -> Dict[str, Any]:
+        """
+        Áp dụng mã khuyến mãi vào booking đã tạo.
+        Use this tool when user provides a promotion code after booking is created (status='pending').
+        This will update the booking total_amount with discount applied.
+        
+        IMPORTANT:
+        - Only works for bookings with status='pending' (after OTP verification, before payment)
+        - If booking already has a promotion, it will be replaced with the new one
+        - After applying, the booking total_amount will be updated with the discount
+        """
+        try:
+            validated = ApplyPromotionCodeInput(
+                booking_id=booking_id,
+                promotion_code=promotion_code
+            )
+            return await _apply_promotion_code_impl(
+                booking_id=validated.booking_id,
+                promotion_code=validated.promotion_code
+            )
+        except ValidationError as e:
+            return {"success": False, "error": f"Input Validation Error: {str(e)}"}
     
-    logger.info("✅ Booking tools registered (including payment tools)")
+    logger.info("✅ Booking tools registered (including payment tools and promotion code tool)")
 
 
 async def _create_payment_impl(
@@ -717,6 +746,159 @@ async def _create_payment_impl(
         }
     except Exception as e:
         logger.error(f"Create payment error: {str(e)}")
+        return {"success": False, "error": f"System error: {str(e)}"}
+
+
+async def _apply_promotion_code_impl(
+    booking_id: str,
+    promotion_code: str
+) -> Dict[str, Any]:
+    """
+    Apply promotion code to existing booking.
+    Validates promotion and updates booking total_amount with discount.
+    """
+    try:
+        supabase = get_supabase_client()
+        promotion_service = PromotionService(supabase)
+        
+        # 1. Get booking and validate status
+        booking_res = supabase.table("bookings")\
+            .select("*, tour_packages(package_name, destination, start_date, price)")\
+            .eq("booking_id", booking_id)\
+            .execute()
+        
+        if not booking_res.data:
+            return {
+                "success": False,
+                "error": f"Booking {booking_id} not found"
+            }
+        
+        booking = booking_res.data[0]
+        
+        # Check booking status - only allow for pending bookings
+        if booking['status'] != 'pending':
+            return {
+                "success": False,
+                "error": f"Cannot apply promotion code. Booking status is '{booking['status']}'. Only bookings with status 'pending' can have promotion codes applied."
+            }
+        
+        # 2. Get promotion by code
+        promo_result = await promotion_service.get_promotion_by_code(promotion_code)
+        
+        if promo_result['EC'] != 0:
+            return {
+                "success": False,
+                "error": f"Promotion code '{promotion_code}' not found or invalid"
+            }
+        
+        promotion = promo_result['promotion']
+        promotion_id = promotion['promotion_id']
+        
+        # Check if booking already has a promotion
+        existing_promo_id = None
+        if booking.get('promotion_id'):
+            existing_promo_id = booking['promotion_id']
+            if str(existing_promo_id) == str(promotion_id):
+                return {
+                    "success": False,
+                    "error": f"Promotion code '{promotion_code}' is already applied to this booking"
+                }
+            # Allow override - will replace existing promotion
+            # Rollback used_count of old promotion
+            try:
+                old_promo_result = await promotion_service.get_promotion_by_id(str(existing_promo_id))
+                if old_promo_result['EC'] == 0:
+                    old_promo = old_promo_result['promotion']
+                    old_used_count = old_promo.get('used_count', 0)
+                    if old_used_count > 0:
+                        # Decrement used_count for old promotion
+                        supabase.table('promotions')\
+                            .update({'used_count': old_used_count - 1})\
+                            .eq('promotion_id', existing_promo_id)\
+                            .execute()
+                        logger.info(f"Rolled back used_count for old promotion {existing_promo_id}")
+            except Exception as e:
+                logger.warning(f"Failed to rollback old promotion used_count: {str(e)}")
+                # Continue anyway - not critical
+        
+        # 3. Get current booking amount to apply discount
+        # Use current total_amount (may already have discount from previous promotion)
+        current_amount = float(booking.get('total_amount', 0))
+        
+        # Get package info for response (not for calculation)
+        pkg = booking.get('tour_packages', {})
+        if isinstance(pkg, list) and pkg:
+            pkg = pkg[0]
+        elif not isinstance(pkg, dict):
+            pkg = {}
+        
+        # Calculate original price (package price * number_of_people) for reference
+        package_price = float(pkg.get('price', 0))
+        number_of_people = booking.get('number_of_people', 1)
+        original_package_amount = package_price * number_of_people
+        
+        # Use current_amount as base for discount calculation
+        # This means if booking already has a promotion, new promotion applies on already-discounted price
+        base_amount = current_amount if current_amount > 0 else original_package_amount
+        
+        # 4. Apply promotion using PromotionService
+        promo_apply_result = await promotion_service.apply_promotion_to_booking(
+            str(promotion_id),
+            base_amount
+        )
+        
+        if promo_apply_result['EC'] != 0:
+            return {
+                "success": False,
+                "error": promo_apply_result['EM']
+            }
+        
+        final_amount = promo_apply_result['final_price']
+        discount_amount = promo_apply_result['discount_amount']
+        
+        # 5. Update booking with new total_amount and promotion_id
+        update_result = supabase.table("bookings")\
+            .update({
+                "total_amount": final_amount,
+                "promotion_id": promotion_id,
+                "updated_at": datetime.now().isoformat()
+            })\
+            .eq("booking_id", booking_id)\
+            .execute()
+        
+        if not update_result.data:
+            return {
+                "success": False,
+                "error": "Failed to update booking with promotion"
+            }
+        
+        # 6. Return success with discount info
+        logger.info(f"✅ Applied promotion code '{promotion_code}' to booking {booking_id}: {base_amount} -> {final_amount} (discount: {discount_amount})")
+        
+        return {
+            "success": True,
+            "message": f"✅ Mã khuyến mãi '{promotion_code}' đã được áp dụng thành công!",
+            "booking_id": booking_id,
+            "promotion_code": promotion_code,
+            "base_amount": base_amount,  # Amount before this promotion (may already have discount)
+            "original_package_amount": original_package_amount,  # Original price without any discount
+            "discount_amount": discount_amount,
+            "final_amount": final_amount,
+            "discount_percentage": round((discount_amount / base_amount * 100), 2) if base_amount > 0 else 0,
+            "booking_info": {
+                "booking_id": booking_id,
+                "tour_name": pkg.get('package_name', 'Unknown Tour'),
+                "destination": pkg.get('destination', 'Unknown'),
+                "number_of_people": number_of_people,
+                "original_package_amount": original_package_amount,
+                "base_amount": base_amount,
+                "final_amount": final_amount,
+                "discount_amount": discount_amount
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Apply promotion code error: {str(e)}")
         return {"success": False, "error": f"System error: {str(e)}"}
 
 
