@@ -23,7 +23,8 @@ class TravelNewsSearchRequest(BaseModel):
 # IMPORTANT: Specific routes must be defined BEFORE dynamic routes like /{k}
 # Otherwise FastAPI will match /list with /{k} and try to parse "list" as integer
 
-@router.get("/list")
+@router.get("/list", include_in_schema=False)
+@router.get("/all")
 async def get_paginated_travel_news_list(
     source_type: Optional[str] = Query(None, description="Filter by source type: 'news' or 'guide'"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -143,7 +144,7 @@ async def search_travel_news(request: TravelNewsSearchRequest):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@router.get("/{k}")
+@router.get("/{k:int}")
 async def get_travel_news(
     k: int = Path(..., ge=1, description="Number of latest news items to fetch for today"),
     source_type: Optional[str] = Query(None, description="Filter by source type: 'news' or 'guide'"),

@@ -76,14 +76,21 @@ def get_current_user(
             detail="User ID not found in token"
         )
     
-    # Query role từ database
-    role = auth_service.get_user_role(user_id)
+    # Query role and activation status từ database
+    user_status = auth_service.get_user_status(user_id)
     
-    if role is None:
+    if user_status is None:
         logger.warning(f"User {user_id} not found in database")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
+        )
+    
+    # Check if account is active
+    if not user_status.get("is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is disabled"
         )
     
     # Return user info với role
@@ -91,7 +98,7 @@ def get_current_user(
         "user_id": user_id,
         "email": token_data.get("email"),
         "full_name": token_data.get("full_name"),
-        "role": role
+        "role": user_status.get("role", "user")
     }
 
 

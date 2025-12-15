@@ -2,7 +2,7 @@
 Main API Router
 """
 from fastapi import APIRouter
-from .endpoints import chat, chat_rooms, agent, health, auth, tour_packages, bookings, booking_management, promotions, payments, reports, travel_news, admin_recommendations, news_agent
+from .endpoints import chat, chat_rooms, agent, health, auth, tour_packages, bookings, booking_management, promotions, payments, reports, travel_news, admin_recommendations, news_agent, admin_users, users, reviews
 
 api_router = APIRouter()
 
@@ -21,3 +21,6 @@ api_router.include_router(promotions.router, prefix="/promotions", tags=["Promot
 api_router.include_router(reports.router, prefix="/reports", tags=["Reports & Analytics"])
 api_router.include_router(travel_news.router, prefix="/travel-news", tags=["Travel News"])
 api_router.include_router(news_agent.router, prefix="/news-agent", tags=["News Agent"])
+api_router.include_router(reviews.router, prefix="/reviews", tags=["Reviews"])
+api_router.include_router(users.router, prefix="/users", tags=["User Profile"])
+api_router.include_router(admin_users.router, prefix="/admin/users", tags=["Admin - User Management"])
