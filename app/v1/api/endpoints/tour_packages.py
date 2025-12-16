@@ -765,9 +765,17 @@ async def create_tour_packages_from_csv(
         if not file.filename.endswith('.csv'):
             raise HTTPException(status_code=400, detail="File phải có định dạng CSV")
         
-        # Đọc nội dung file
+        # Đọc nội dung file (ưu tiên UTF-8, fallback nếu file không hợp lệ)
         contents = await file.read()
-        csv_text = contents.decode('utf-8-sig')  # utf-8-sig để xử lý BOM
+        try:
+            csv_text = contents.decode('utf-8-sig')  # utf-8-sig để xử lý BOM
+        except UnicodeDecodeError as decode_err:
+            # Một số file CSV có thể ở encoding khác (VD: Windows-1258) hoặc chứa byte lỗi
+            logger.warning(f"CSV decode failed with utf-8-sig: {decode_err}. Falling back to tolerant decode.")
+            try:
+                csv_text = contents.decode('cp1258')  # Thử Windows-1258 phổ biến cho tiếng Việt
+            except Exception:
+                csv_text = contents.decode('utf-8', errors='replace')  # Cuối cùng: bỏ/replace byte lỗi
         csv_reader = csv.DictReader(io.StringIO(csv_text))
         
         # Kiểm tra header
