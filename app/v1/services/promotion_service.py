@@ -201,6 +201,214 @@ class PromotionService:
                 "promotions": []
             }
     
+    async def filter_promotions_by_discount(
+        self,
+        min_discount_value: Optional[float] = None,
+        max_discount_value: Optional[float] = None,
+        is_active: Optional[bool] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Lọc promotions theo khoảng discount_value
+        """
+        try:
+            query = self.supabase.table('promotions').select('*')
+
+            if min_discount_value is not None:
+                query = query.gte('discount_value', min_discount_value)
+            if max_discount_value is not None:
+                query = query.lte('discount_value', max_discount_value)
+
+            if is_active is not None:
+                query = query.eq('is_active', is_active)
+
+            if offset is not None:
+                query = query.range(offset, offset + (limit or 100) - 1)
+            elif limit is not None:
+                query = query.limit(limit)
+
+            result = query.execute()
+
+            return {
+                "EC": 0,
+                "EM": "Promotions filtered by discount_value successfully",
+                "found": len(result.data),
+                "promotions": result.data
+            }
+
+        except Exception as e:
+            logger.error(f"Error filtering promotions by discount_value: {str(e)}")
+            return {
+                "EC": 2,
+                "EM": f"Error filtering promotions: {str(e)}",
+                "found": 0,
+                "promotions": []
+            }
+
+    async def filter_promotions_by_date_range(
+        self,
+        start_date: Optional[datetime],
+        end_date: Optional[datetime],
+        is_active: Optional[bool] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Filter promotions by date, comparing ONLY the calendar date (YYYY-MM-DD),
+        ignoring time and timezone, implemented via half-open day ranges:
+        - Only start_date: start_date in [start_date 00:00, start_date+1 00:00)
+        - Only end_date: end_date in [end_date 00:00, end_date+1 00:00)
+        - Both: intersection of both conditions
+        """
+        try:
+            query = self.supabase.table('promotions').select('*')
+
+            # Build day-range boundaries as ISO strings (Postgres will cast to timestamp)
+            if start_date is not None:
+                start_day = start_date.date()
+                start_lower = start_day.isoformat()  # YYYY-MM-DD 00:00 implicit
+                # next day for upper bound (exclusive)
+                from datetime import timedelta
+                start_upper = (start_day + timedelta(days=1)).isoformat()
+            else:
+                start_lower = start_upper = None
+
+            if end_date is not None:
+                end_day = end_date.date()
+                end_lower = end_day.isoformat()
+                from datetime import timedelta
+                end_upper = (end_day + timedelta(days=1)).isoformat()
+            else:
+                end_lower = end_upper = None
+
+            # Only start_date: match records whose start_date is within that day
+            if start_lower is not None and end_lower is None:
+                query = query.gte('start_date', start_lower).lt('start_date', start_upper)
+            # Only end_date: match records whose end_date is within that day
+            elif end_lower is not None and start_lower is None:
+                query = query.gte('end_date', end_lower).lt('end_date', end_upper)
+            # Both: require both dates to fall on the specified days
+            elif start_lower is not None and end_lower is not None:
+                query = query.gte('start_date', start_lower).lt('start_date', start_upper)
+                query = query.gte('end_date', end_lower).lt('end_date', end_upper)
+
+            if is_active is not None:
+                query = query.eq('is_active', is_active)
+
+            if offset is not None:
+                query = query.range(offset, offset + (limit or 100) - 1)
+            elif limit is not None:
+                query = query.limit(limit)
+
+            result = query.execute()
+
+            return {
+                "EC": 0,
+                "EM": "Promotions filtered by date range successfully",
+                "found": len(result.data),
+                "promotions": result.data
+            }
+
+        except Exception as e:
+            logger.error(f"Error filtering promotions by date range: {str(e)}")
+            return {
+                "EC": 2,
+                "EM": f"Error filtering promotions: {str(e)}",
+                "found": 0,
+                "promotions": []
+            }
+
+    async def filter_promotions_by_quantity(
+        self,
+        min_quantity: Optional[int] = None,
+        max_quantity: Optional[int] = None,
+        is_active: Optional[bool] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Lọc promotions theo khoảng quantity
+        """
+        try:
+            query = self.supabase.table('promotions').select('*')
+
+            if min_quantity is not None:
+                query = query.gte('quantity', min_quantity)
+            if max_quantity is not None:
+                query = query.lte('quantity', max_quantity)
+
+            if is_active is not None:
+                query = query.eq('is_active', is_active)
+
+            if offset is not None:
+                query = query.range(offset, offset + (limit or 100) - 1)
+            elif limit is not None:
+                query = query.limit(limit)
+
+            result = query.execute()
+
+            return {
+                "EC": 0,
+                "EM": "Promotions filtered by quantity successfully",
+                "found": len(result.data),
+                "promotions": result.data
+            }
+
+        except Exception as e:
+            logger.error(f"Error filtering promotions by quantity: {str(e)}")
+            return {
+                "EC": 2,
+                "EM": f"Error filtering promotions: {str(e)}",
+                "found": 0,
+                "promotions": []
+            }
+
+    async def filter_promotions_by_used_count(
+        self,
+        min_user_count: Optional[int] = None,
+        max_user_count: Optional[int] = None,
+        is_active: Optional[bool] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Lọc promotions theo khoảng used_count (user_count)
+        """
+        try:
+            query = self.supabase.table('promotions').select('*')
+
+            if min_user_count is not None:
+                query = query.gte('used_count', min_user_count)
+            if max_user_count is not None:
+                query = query.lte('used_count', max_user_count)
+
+            if is_active is not None:
+                query = query.eq('is_active', is_active)
+
+            if offset is not None:
+                query = query.range(offset, offset + (limit or 100) - 1)
+            elif limit is not None:
+                query = query.limit(limit)
+
+            result = query.execute()
+
+            return {
+                "EC": 0,
+                "EM": "Promotions filtered by user_count successfully",
+                "found": len(result.data),
+                "promotions": result.data
+            }
+
+        except Exception as e:
+            logger.error(f"Error filtering promotions by user_count: {str(e)}")
+            return {
+                "EC": 2,
+                "EM": f"Error filtering promotions: {str(e)}",
+                "found": 0,
+                "promotions": []
+            }
+    
     async def update_promotion(self, promotion_id: str, update_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Cập nhật thông tin promotion

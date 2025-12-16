@@ -261,19 +261,19 @@ async def filter_tours_by_year(
 
 @router.get("/filter/by-date", response_model=TourPackageListResponse)
 async def filter_tours_by_date(
-    target_date: date = Query(..., description="Ngày cần lọc (YYYY-MM-DD)"),
-    date_type: str = Query("start_date", description="Loại ngày để lọc: 'start_date' hoặc 'end_date'"),
+    start_date: date = Query(..., description="Ngày bắt đầu khoảng lọc (YYYY-MM-DD)"),
+    end_date: date = Query(..., description="Ngày kết thúc khoảng lọc (YYYY-MM-DD)"),
     is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
     limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
     offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
-    Lọc tour packages theo ngày cụ thể
+    Lọc tour packages theo khoảng ngày (start_date -> end_date)
     
     Args:
-        target_date: Ngày cần lọc (YYYY-MM-DD)
-        date_type: Loại ngày để lọc ('start_date' hoặc 'end_date', mặc định: 'start_date')
+        start_date: Ngày bắt đầu khoảng lọc (YYYY-MM-DD)
+        end_date: Ngày kết thúc khoảng lọc (YYYY-MM-DD)
         is_active: Lọc theo trạng thái hoạt động
         limit: Giới hạn số lượng kết quả trả về
         offset: Bỏ qua số lượng bản ghi
@@ -283,16 +283,15 @@ async def filter_tours_by_date(
         TourPackageListResponse với danh sách tour packages
         
     Example:
-        GET /api/v1/tour-packages/filter/by-date?target_date=2024-12-25
-        GET /api/v1/tour-packages/filter/by-date?target_date=2024-12-25&date_type=end_date
+        GET /api/v1/tour-packages/filter/by-date?start_date=2024-12-20&end_date=2024-12-31
     """
     try:
-        if date_type not in ['start_date', 'end_date']:
-            raise HTTPException(status_code=400, detail="date_type phải là 'start_date' hoặc 'end_date'")
+        if start_date > end_date:
+            raise HTTPException(status_code=400, detail="start_date phải nhỏ hơn hoặc bằng end_date")
         
         result = await service.filter_packages_by_date(
-            target_date=target_date,
-            date_type=date_type,
+            start_date=start_date,
+            end_date=end_date,
             is_active=is_active,
             limit=limit,
             offset=offset
