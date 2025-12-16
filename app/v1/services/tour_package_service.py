@@ -416,18 +416,18 @@ class TourPackageService:
     
     async def filter_packages_by_date(
         self,
-        target_date: date,
-        date_type: str = "start_date",
+        start_date: date,
+        end_date: date,
         is_active: Optional[bool] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Filter tour packages by specific date
+        Filter tour packages by a date range (inclusive).
         
         Args:
-            target_date: Specific date to filter
-            date_type: Type of date to filter ('start_date' or 'end_date')
+            start_date: Range start (YYYY-MM-DD)
+            end_date: Range end (YYYY-MM-DD)
             is_active: Filter by active status
             limit: Number of records to return
             offset: Number of records to skip
@@ -438,17 +438,15 @@ class TourPackageService:
         try:
             query = self.supabase.table('tour_packages').select('*')
             
-            # Filter by exact date
-            query = query.eq(date_type, target_date.isoformat())
+            # Filter packages that start on/after start_date and end on/before end_date
+            query = query.gte('start_date', start_date.isoformat())
+            query = query.lte('end_date', end_date.isoformat())
             
-            # Apply additional filters
             if is_active is not None:
                 query = query.eq('is_active', is_active)
             
-            # Order by date
-            query = query.order(date_type, desc=False)
+            query = query.order('start_date', desc=False)
             
-            # Apply pagination
             if limit:
                 query = query.limit(limit)
             if offset:
@@ -458,13 +456,13 @@ class TourPackageService:
             
             return {
                 "EC": 0,
-                "EM": f"Successfully retrieved tour packages for {target_date.isoformat()}",
+                "EM": f"Successfully retrieved tour packages from {start_date.isoformat()} to {end_date.isoformat()}",
                 "total": len(result.data),
                 "packages": result.data
             }
             
         except Exception as e:
-            logger.error(f"Error filtering packages by date: {str(e)}")
+            logger.error(f"Error filtering packages by date range: {str(e)}")
             return {
                 "EC": 1,
                 "EM": f"Error filtering tour packages: {str(e)}",

@@ -2,6 +2,7 @@
 Promotion API Endpoints
 """
 import logging
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from uuid import UUID
@@ -95,6 +96,140 @@ async def get_promotions(
         
     except Exception as e:
         logger.error(f"Error in get_promotions endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/filter/by-discount", response_model=PromotionListResponse)
+async def filter_promotions_by_discount(
+    min_discount_value: Optional[float] = Query(None, gt=0, description="Giá trị giảm tối thiểu"),
+    max_discount_value: Optional[float] = Query(None, gt=0, description="Giá trị giảm tối đa"),
+    is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    service: PromotionService = Depends(get_promotion_service)
+):
+    """
+    Lọc promotions theo khoảng discount_value.
+    Có thể truyền min_discount_value, max_discount_value hoặc cả hai.
+    """
+    try:
+        if min_discount_value is None and max_discount_value is None:
+            raise HTTPException(status_code=400, detail="Cần ít nhất một trong min_discount_value hoặc max_discount_value")
+
+        result = await service.filter_promotions_by_discount(
+            min_discount_value=min_discount_value,
+            max_discount_value=max_discount_value,
+            is_active=is_active,
+            limit=limit,
+            offset=offset
+        )
+        return PromotionListResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in filter_promotions_by_discount endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/filter/by-date-range", response_model=PromotionListResponse)
+async def filter_promotions_by_date_range(
+    start_date: Optional[datetime] = Query(None, description="Ngày bắt đầu khoảng lọc (tùy chọn)"),
+    end_date: Optional[datetime] = Query(None, description="Ngày kết thúc khoảng lọc (tùy chọn)"),
+    is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    service: PromotionService = Depends(get_promotion_service)
+):
+    """
+    Lọc promotions theo thời gian:
+    - Chỉ start_date: lấy những promotion có start_date đúng ngày/giờ đó
+    - Chỉ end_date: lấy những promotion có end_date đúng ngày/giờ đó
+    - Cả hai: chỉ lấy những promotion có cả start_date VÀ end_date đều đúng ngày/giờ đã truyền
+    """
+    try:
+        if start_date is None and end_date is None:
+            raise HTTPException(status_code=400, detail="Cần start_date hoặc end_date")
+        if start_date and end_date and start_date > end_date:
+            raise HTTPException(status_code=400, detail="start_date phải nhỏ hơn hoặc bằng end_date")
+
+        result = await service.filter_promotions_by_date_range(
+            start_date=start_date,
+            end_date=end_date,
+            is_active=is_active,
+            limit=limit,
+            offset=offset
+        )
+        return PromotionListResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in filter_promotions_by_date_range endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/filter/by-quantity", response_model=PromotionListResponse)
+async def filter_promotions_by_quantity(
+    min_quantity: Optional[int] = Query(None, ge=0, description="Số lượng tối thiểu"),
+    max_quantity: Optional[int] = Query(None, ge=0, description="Số lượng tối đa"),
+    is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    service: PromotionService = Depends(get_promotion_service)
+):
+    """
+    Lọc promotions theo khoảng quantity (min-max).
+    """
+    try:
+        if min_quantity is None and max_quantity is None:
+            raise HTTPException(status_code=400, detail="Cần ít nhất một trong min_quantity hoặc max_quantity")
+
+        result = await service.filter_promotions_by_quantity(
+            min_quantity=min_quantity,
+            max_quantity=max_quantity,
+            is_active=is_active,
+            limit=limit,
+            offset=offset
+        )
+        return PromotionListResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in filter_promotions_by_quantity endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/filter/by-user-count", response_model=PromotionListResponse)
+async def filter_promotions_by_user_count(
+    min_user_count: Optional[int] = Query(None, ge=0, description="Số lượt sử dụng tối thiểu"),
+    max_user_count: Optional[int] = Query(None, ge=0, description="Số lượt sử dụng tối đa"),
+    is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    service: PromotionService = Depends(get_promotion_service)
+):
+    """
+    Lọc promotions theo khoảng user_count (thực tế là trường used_count trong DB).
+    """
+    try:
+        if min_user_count is None and max_user_count is None:
+            raise HTTPException(status_code=400, detail="Cần ít nhất một trong min_user_count hoặc max_user_count")
+
+        result = await service.filter_promotions_by_used_count(
+            min_user_count=min_user_count,
+            max_user_count=max_user_count,
+            is_active=is_active,
+            limit=limit,
+            offset=offset
+        )
+        return PromotionListResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in filter_promotions_by_user_count endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
