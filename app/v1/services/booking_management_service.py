@@ -429,3 +429,112 @@ class BookingManagementService:
                 "data": None
             }
 
+    async def get_all_cancellations_admin(
+        self,
+        cancelled_by: Optional[str] = None,
+        limit: Optional[int] = 100,
+        offset: Optional[int] = 0
+    ) -> Dict[str, Any]:
+        """
+        Admin: Lấy danh sách tất cả booking cancellations trong hệ thống
+        
+        Args:
+            cancelled_by: Filter by who cancelled (user/admin/system)
+            limit: Maximum number of results
+            offset: Number of records to skip
+            
+        Returns:
+            Dict with EC, EM, data, and total
+        """
+        try:
+            # Query booking_cancellations with joins
+            query = self.supabase.table('booking_cancellations')\
+                .select('*', count='exact')
+            
+            # Apply filter
+            if cancelled_by:
+                query = query.eq('cancelled_by', cancelled_by)
+            
+            # Apply pagination
+            if limit:
+                query = query.limit(limit)
+            if offset:
+                query = query.offset(offset)
+            
+            # Order by cancelled_at descending
+            query = query.order('cancelled_at', desc=True)
+            
+            result = query.execute()
+            
+            # Format response data with additional info
+            formatted_data = []
+            for cancel in result.data:
+                # Get tour info
+                tour_name = "Unknown Tour"
+                if cancel.get('package_id'):
+                    try:
+                        tour_result = self.supabase.table('tour_packages')\
+                            .select('package_name, destination')\
+                            .eq('package_id', cancel['package_id'])\
+                            .execute()
+                        if tour_result.data:
+                            tour_info = tour_result.data[0]
+                            tour_name = tour_info.get('package_name', 'Unknown Tour')
+                    except Exception as e:
+                        logger.warning(f"Could not fetch tour info for {cancel.get('package_id')}: {str(e)}")
+                
+                # Get user info
+                user_email = None
+                user_full_name = None
+                if cancel.get('user_id'):
+                    try:
+                        user_result = self.supabase.table('users')\
+                            .select('email, full_name')\
+                            .eq('user_id', cancel['user_id'])\
+                            .execute()
+                        if user_result.data:
+                            user_info = user_result.data[0]
+                            user_email = user_info.get('email')
+                            user_full_name = user_info.get('full_name')
+                    except Exception as e:
+                        logger.warning(f"Could not fetch user info for {cancel.get('user_id')}: {str(e)}")
+                
+                formatted_data.append({
+                    "cancellation_id": cancel.get('cancellation_id'),
+                    "booking_id": cancel.get('booking_id'),
+                    "user_id": cancel.get('user_id'),
+                    "user_email": user_email,
+                    "user_full_name": user_full_name,
+                    "package_id": cancel.get('package_id'),
+                    "tour_name": tour_name,
+                    # Booking snapshot
+                    "number_of_people": cancel.get('number_of_people'),
+                    "total_amount": float(cancel.get('total_amount', 0)) if cancel.get('total_amount') else 0,
+                    "contact_name": cancel.get('contact_name'),
+                    "contact_phone": cancel.get('contact_phone'),
+                    "contact_email": cancel.get('contact_email'),
+                    "special_requests": cancel.get('special_requests'),
+                    "previous_status": cancel.get('previous_status'),
+                    "booking_created_at": cancel.get('booking_created_at'),
+                    # Cancellation info
+                    "reason": cancel.get('reason'),
+                    "cancelled_at": cancel.get('cancelled_at'),
+                    "cancelled_by": cancel.get('cancelled_by'),
+                    "created_at": cancel.get('created_at')
+                })
+            
+            return {
+                "EC": 0,
+                "EM": "Success",
+                "data": formatted_data,
+                "total": result.count
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting all cancellations admin: {str(e)}")
+            return {
+                "EC": 1,
+                "EM": f"Error retrieving cancellations: {str(e)}",
+                "data": None,
+                "total": 0
+            }

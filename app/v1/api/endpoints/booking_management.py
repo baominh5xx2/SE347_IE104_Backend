@@ -200,6 +200,36 @@ async def get_user_bookings_admin(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/admin/cancellations")
+async def get_booking_cancellations_admin(
+    cancelled_by: Optional[str] = Query(None, description="Filter by who cancelled (user/admin/system)"),
+    limit: Optional[int] = Query(100, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(0, ge=0, description="Bỏ qua số lượng"),
+    current_admin: dict = Depends(get_current_admin),
+    service: BookingManagementService = Depends(get_booking_management_service)
+):
+    """
+    Admin: Lấy danh sách tất cả booking cancellations trong hệ thống
+    
+    Returns:
+        List of booking cancellations with tour and user info
+    """
+    try:
+        result = await service.get_all_cancellations_admin(
+            cancelled_by=cancelled_by,
+            limit=limit,
+            offset=offset
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_booking_cancellations_admin endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/admin/{booking_id}", response_model=AdminBookingDetailResponse)
 async def get_booking_detail_admin(
     booking_id: UUID,
