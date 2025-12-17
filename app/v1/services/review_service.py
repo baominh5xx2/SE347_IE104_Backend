@@ -46,7 +46,11 @@ class ReviewService:
             Dict with EC, EM, data, and total
         """
         try:
-            query = self.supabase.table('reviews').select('*', count='exact')
+            # Select reviews with tour_packages info via JOIN through bookings
+            query = self.supabase.table('reviews').select(
+                'review_id, booking_id, user_id, package_id, rating, comment, is_approved, created_at, updated_at, bookings(package_id, tour_packages(package_id, package_name, destination, price))',
+                count='exact'
+            )
             
             # Apply filters
             if package_id:
@@ -69,10 +73,41 @@ class ReviewService:
             
             result = query.execute()
             
+            # Flatten nested bookings.tour_packages data
+            flattened_data = []
+            for review in (result.data or []):
+                # Get bookings data
+                booking_data = review.get('bookings')
+                if isinstance(booking_data, list) and booking_data:
+                    booking_data = booking_data[0]
+                elif not isinstance(booking_data, dict):
+                    booking_data = {}
+                
+                # Get tour_packages data from bookings
+                package_data = booking_data.get('tour_packages', {}) if booking_data else {}
+                if isinstance(package_data, list) and package_data:
+                    package_data = package_data[0]
+                elif not isinstance(package_data, dict):
+                    package_data = {}
+                
+                flattened_review = {
+                    "review_id": review.get('review_id'),
+                    "booking_id": review.get('booking_id'),
+                    "user_id": review.get('user_id'),
+                    "package_id": review.get('package_id'),
+                    "rating": review.get('rating'),
+                    "comment": review.get('comment'),
+                    "is_approved": review.get('is_approved'),
+                    "created_at": review.get('created_at'),
+                    "updated_at": review.get('updated_at'),
+                    "package": package_data if package_data else None
+                }
+                flattened_data.append(flattened_review)
+            
             return {
                 "EC": 0,
                 "EM": "Success",
-                "data": result.data,
+                "data": flattened_data,
                 "total": result.count
             }
             

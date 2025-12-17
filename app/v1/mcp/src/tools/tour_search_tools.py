@@ -228,15 +228,18 @@ class TourPackageSearchService:
         try:
             logger.info(f"🔍 Starting keyword search: '{query[:50]}...' (limit: {limit})")
             
-            # Build base query
-            base_query = self.supabase.table("tour_packages").select("*")
-            
-            # Apply filters at database level
-            if filters:
-                base_query = self._apply_database_filters(base_query, filters)
-            
-            # Add active filter
-            base_query = base_query.eq("is_active", True)
+            # Helper function to build base query with filters (need fresh query for each field)
+            def build_base_query():
+                query_builder = self.supabase.table("tour_packages").select("*")
+                
+                # Apply filters at database level
+                if filters:
+                    query_builder = self._apply_database_filters(query_builder, filters)
+                
+                # Add active filter
+                query_builder = query_builder.eq("is_active", True)
+                
+                return query_builder
             
             # Try to use full-text search if search_vector column exists
             # Otherwise, use LIKE queries as fallback
@@ -247,29 +250,35 @@ class TourPackageSearchService:
                 # Supabase doesn't support complex OR in single query, so we'll search each field
                 results_by_field = []
                 
-                # Search package_name (highest priority)
+                # Search package_name (highest priority) - BUILD FRESH QUERY
                 try:
-                    name_results = base_query.ilike('package_name', f'%{query}%').limit(limit * 2).execute()
+                    name_query = build_base_query()
+                    name_results = name_query.ilike('package_name', f'%{query}%').limit(limit * 2).execute()
                     if name_results.data:
                         results_by_field.extend(name_results.data)
-                except:
-                    pass
+                        logger.debug(f"Found {len(name_results.data)} packages in package_name")
+                except Exception as e:
+                    logger.warning(f"⚠️ Search package_name failed: {e}")
                 
-                # Search destination
+                # Search destination - BUILD FRESH QUERY
                 try:
-                    dest_results = base_query.ilike('destination', f'%{query}%').limit(limit * 2).execute()
+                    dest_query = build_base_query()
+                    dest_results = dest_query.ilike('destination', f'%{query}%').limit(limit * 2).execute()
                     if dest_results.data:
                         results_by_field.extend(dest_results.data)
-                except:
-                    pass
+                        logger.debug(f"Found {len(dest_results.data)} packages in destination")
+                except Exception as e:
+                    logger.warning(f"⚠️ Search destination failed: {e}")
                 
-                # Search description
+                # Search description - BUILD FRESH QUERY
                 try:
-                    desc_results = base_query.ilike('description', f'%{query}%').limit(limit * 2).execute()
+                    desc_query = build_base_query()
+                    desc_results = desc_query.ilike('description', f'%{query}%').limit(limit * 2).execute()
                     if desc_results.data:
                         results_by_field.extend(desc_results.data)
-                except:
-                    pass
+                        logger.debug(f"Found {len(desc_results.data)} packages in description")
+                except Exception as e:
+                    logger.warning(f"⚠️ Search description failed: {e}")
                 
                 # Deduplicate by package_id
                 seen_ids = set()
@@ -322,21 +331,17 @@ class TourPackageSearchService:
                     
             except Exception as e:
                 logger.warning(f"⚠️ Keyword search error: {e}")
-                # Fallback: simple LIKE search
+                # Fallback: simple LIKE search with fresh query
                 try:
-                    result = (
-                        base_query
-                        .ilike('package_name', f'%{query}%')
-                        .limit(limit)
-                        .execute()
-                    )
+                    fallback_query = build_base_query()
+                    result = fallback_query.ilike('package_name', f'%{query}%').limit(limit).execute()
                     if result.data:
                         for pkg in result.data:
                             pkg['keyword_score'] = 0.5  # Default score
                         logger.info(f"✅ Fallback keyword search found {len(result.data)} packages")
                         return result.data
-                except:
-                    pass
+                except Exception as fallback_error:
+                    logger.error(f"❌ Fallback keyword search also failed: {fallback_error}")
                 return []
             
         except Exception as e:
