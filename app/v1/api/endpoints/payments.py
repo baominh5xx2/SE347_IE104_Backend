@@ -359,6 +359,83 @@ async def create_payment_by_admin(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/admin/{payment_id}/confirm", response_model=AdminPaymentCreateResponse)
+async def confirm_payment_by_admin(
+    payment_id: UUID,
+    current_admin: dict = Depends(get_current_admin),
+    service: PaymentService = Depends(get_payment_service)
+):
+    """
+    Xác nhận payment pending bởi admin (chuyển status thành completed)
+    
+    - REQUIRE ADMIN AUTHENTICATION
+    - Chỉ áp dụng cho payment có status 'pending'
+    - Update payment status thành 'completed'
+    - Update booking status thành 'confirmed'
+    
+    Args:
+        payment_id: UUID của payment cần xác nhận
+        current_admin: Admin info từ authentication
+        service: Payment service instance
+        
+    Returns:
+        AdminPaymentCreateResponse với thông tin payment đã confirmed
+    """
+    try:
+        admin_id = current_admin.get("user_id")
+        supabase = get_supabase_client()
+        
+        # Get payment
+        payment_result = supabase.table('payments')\
+            .select('*')\
+            .eq('payment_id', str(payment_id))\
+            .execute()
+        
+        if not payment_result.data:
+            raise HTTPException(status_code=404, detail="Payment not found")
+        
+        payment = payment_result.data[0]
+        
+        if payment['payment_status'] != 'pending':
+            raise HTTPException(status_code=400, detail=f"Payment status is {payment['payment_status']}, expected pending")
+        
+        # Update payment to completed
+        from datetime import datetime
+        update_data = {
+            'payment_status': 'completed',
+            'paid_at': datetime.utcnow().isoformat(),
+            'created_by_admin_id': admin_id
+        }
+        
+        update_result = supabase.table('payments')\
+            .update(update_data)\
+            .eq('payment_id', str(payment_id))\
+            .execute()
+        
+        if not update_result.data:
+            raise HTTPException(status_code=500, detail="Failed to update payment")
+        
+        # Update booking to confirmed
+        supabase.table('bookings')\
+            .update({'status': 'confirmed'})\
+            .eq('booking_id', payment['booking_id'])\
+            .execute()
+        
+        logger.info(f"Admin {admin_id} confirmed payment {payment_id}")
+        
+        return AdminPaymentCreateResponse(
+            EC=0,
+            EM="Payment confirmed successfully",
+            data=update_result.data[0]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in confirm_payment_by_admin endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/admin/{payment_id}/refund", response_model=AdminPaymentRefundResponse)
 async def refund_payment_by_admin(
     payment_id: UUID,
