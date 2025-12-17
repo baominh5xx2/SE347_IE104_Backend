@@ -726,6 +726,52 @@ async def delete_tour_package(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{package_id}/cancel")
+async def cancel_tour_package(
+    package_id: UUID,
+    reason: Optional[str] = Query(None, description="Lý do hủy tour"),
+    service: TourPackageService = Depends(get_tour_package_service)
+):
+    """
+    Hủy tour package và tất cả bookings liên quan (Admin only)
+    
+    Khi admin hủy tour:
+    1. Set is_active = False
+    2. Tự động hủy tất cả bookings có status 'pending' hoặc 'confirmed'
+    3. Hoàn trả available_slots cho mỗi booking
+    4. Tạo notification cho tất cả users bị ảnh hưởng
+    
+    Args:
+        package_id: UUID của tour package cần hủy
+        reason: Lý do hủy tour
+        service: Tour package service instance
+        
+    Returns:
+        Dict với số booking đã hủy và số notification đã gửi
+        
+    Example:
+        POST /api/v1/tour-packages/123e4567-e89b-12d3-a456-426614174000/cancel?reason=Thiên tai
+    """
+    try:
+        result = await service.cancel_tour_package(
+            package_id=str(package_id),
+            reason=reason
+        )
+        
+        if result["EC"] == 1:
+            raise HTTPException(status_code=404, detail=result["EM"])
+        elif result["EC"] != 0:
+            raise HTTPException(status_code=400, detail=result["EM"])
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in cancel_tour_package endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/bulk/csv", response_model=TourPackageBulkCreateResponse, status_code=201)
 async def create_tour_packages_from_csv(
     file: UploadFile = File(..., description="CSV file chứa dữ liệu tour packages"),

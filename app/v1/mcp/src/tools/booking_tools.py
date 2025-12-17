@@ -291,7 +291,7 @@ async def _update_booking_impl(
 
 
 async def _delete_booking_impl(booking_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
-    """Implementation of delete_booking tool"""
+    """Implementation of delete_booking tool - SOFT DELETE (cancel)"""
     try:
         supabase = get_supabase_client()
         
@@ -302,23 +302,52 @@ async def _delete_booking_impl(booking_id: str, reason: Optional[str] = None) ->
         booking = booking_res.data[0]
         
         if booking['status'] == 'cancelled':
-             return {"success": False, "error": "Booking is already cancelled."}
+            return {"success": False, "error": "Booking is already cancelled."}
+        
+        if booking['status'] not in ['pending', 'confirmed']:
+            return {"success": False, "error": f"Cannot cancel booking with status '{booking['status']}'"}
+        
+        # 2. Insert to booking_cancellations table (full booking snapshot)
+        cancellation_data = {
+            "booking_id": booking_id,
+            "user_id": booking['user_id'],
+            "package_id": booking['package_id'],
+            # Booking snapshot
+            "number_of_people": booking['number_of_people'],
+            "total_amount": booking.get('total_amount'),
+            "contact_name": booking.get('contact_name'),
+            "contact_phone": booking.get('contact_phone'),
+            "contact_email": booking.get('contact_email'),
+            "special_requests": booking.get('special_requests'),
+            "previous_status": booking['status'],  # Status before cancel
+            "promotion_id": booking.get('promotion_id'),
+            "booking_created_at": booking.get('created_at'),
+            # Cancellation info
+            "reason": reason,
+            "cancelled_by": "user"
+        }
+        supabase.table("booking_cancellations").insert(cancellation_data).execute()
+        
+        # 3. Update booking status to cancelled (soft delete)
+        supabase.table("bookings").update({
+            "status": "cancelled",
+            "updated_at": "now()"
+        }).eq("booking_id", booking_id).execute()
 
-        # 2. Restore Slots
+        # 4. Restore Slots
         package_id = booking['package_id']
         package_res = supabase.table("tour_packages").select("available_slots").eq("package_id", package_id).execute()
         if package_res.data:
             current_slots = package_res.data[0]['available_slots']
             new_slots = current_slots + booking['number_of_people']
             supabase.table("tour_packages").update({"available_slots": new_slots}).eq("package_id", package_id).execute()
+            logger.info(f"Restored {booking['number_of_people']} slots to package {package_id}")
 
-        # 3. Delete Booking (Hard Delete)
-        res = supabase.table("bookings").delete().eq("booking_id", booking_id).execute()
-        
-        return {"success": True, "message": f"Booking {booking_id} deleted successfully."}
+        logger.info(f"Cancelled booking {booking_id}")
+        return {"success": True, "message": f"Booking {booking_id} cancelled successfully."}
 
     except Exception as e:
-        logger.error(f"Delete booking error: {str(e)}")
+        logger.error(f"Cancel booking error: {str(e)}")
         return {"success": False, "error": f"System error: {str(e)}"}
 
 

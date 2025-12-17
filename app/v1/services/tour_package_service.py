@@ -31,6 +31,7 @@ except ImportError:
 # Import admin services
 from .admin_settings_service import AdminSettingsService
 from .admin_featured_tours_service import AdminFeaturedToursService
+from .notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class TourPackageService:
         # Initialize admin services
         self.admin_settings = AdminSettingsService(supabase_client)
         self.admin_featured_tours = AdminFeaturedToursService(supabase_client)
+        self.notification_service = NotificationService(supabase_client)
     
     async def _generate_embedding(self, package_data: Dict[str, Any]) -> Optional[List[float]]:
         """
@@ -1203,4 +1205,118 @@ class TourPackageService:
                 "packages": []
             }
     
-    
+    async def cancel_tour_package(
+        self,
+        package_id: str,
+        reason: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Cancel a tour package and all related bookings
+        
+        When admin cancels a tour:
+        1. Set is_active = False
+        2. Get all bookings with status 'pending' or 'confirmed'
+        3. Cancel each booking (soft delete)
+        4. Restore available_slots
+        5. Create notification for each affected user
+        
+        Args:
+            package_id: UUID of the tour package
+            reason: Reason for cancellation
+            
+        Returns:
+            Dict with EC, EM, and cancelled counts
+        """
+        try:
+            # Import BookingService here to avoid circular import
+            from .booking_service import BookingService
+            booking_service = BookingService(self.supabase)
+            
+            # 1. Get tour package details
+            package_result = await self.get_package_by_id(package_id)
+            if package_result["EC"] != 0:
+                return package_result
+            
+            package = package_result["package"]
+            package_name = package.get('package_name', 'Unknown Tour')
+            
+            # 2. Set is_active = False
+            update_result = self.supabase.table('tour_packages') \
+                .update({"is_active": False, "updated_at": "now()"}) \
+                .eq('package_id', package_id) \
+                .execute()
+            
+            if not update_result.data:
+                return {
+                    "EC": 1,
+                    "EM": "Failed to deactivate tour package"
+                }
+            
+            # 3. Get all related bookings (pending/confirmed)
+            bookings_result = self.supabase.table('bookings') \
+                .select('booking_id, user_id, status, number_of_people') \
+                .eq('package_id', package_id) \
+                .in_('status', ['pending', 'confirmed']) \
+                .execute()
+            
+            if not bookings_result.data:
+                logger.info(f"Tour {package_id} cancelled, no active bookings to cancel")
+                return {
+                    "EC": 0,
+                    "EM": "Tour cancelled successfully. No active bookings.",
+                    "cancelled_bookings": 0
+                }
+            
+            # 4. Cancel each booking and create notification
+            cancelled_count = 0
+            notification_count = 0
+            
+            for booking in bookings_result.data:
+                # Cancel booking
+                cancel_result = await booking_service.cancel_booking(
+                    booking_id=booking['booking_id'],
+                    reason=f"Tour đã bị hủy bởi admin. {reason or ''}".strip(),
+                    cancelled_by="admin"
+                )
+                
+                if cancel_result["EC"] == 0:
+                    cancelled_count += 1
+                    
+                    # Create notification for user
+                    notification_result = await self.notification_service.create_notification(
+                        user_id=booking['user_id'],
+                        type="tour_cancelled",
+                        title=f"Tour '{package_name}' đã bị hủy",
+                        message=f"Rất tiếc, tour '{package_name}' đã bị hủy bởi admin. " + 
+                                f"Lý do: {reason or 'Không rõ lý do'}. " +
+                                f"Số slot của bạn ({booking['number_of_people']} người) đã được hoàn lại.",
+                        metadata={
+                            "package_id": package_id,
+                            "package_name": package_name,
+                            "booking_id": booking['booking_id'],
+                            "reason": reason
+                        }
+                    )
+                    
+                    if notification_result["EC"] == 0:
+                        notification_count += 1
+                else:
+                    logger.warning(f"Failed to cancel booking {booking['booking_id']}: {cancel_result['EM']}")
+            
+            logger.info(f"Cancelled tour {package_id}: {cancelled_count} bookings cancelled, {notification_count} notifications sent")
+            
+            return {
+                "EC": 0,
+                "EM": f"Tour cancelled successfully. {cancelled_count} bookings cancelled, {notification_count} users notified.",
+                "cancelled_bookings": cancelled_count,
+                "notifications_sent": notification_count
+            }
+            
+        except Exception as e:
+            logger.error(f"Error cancelling tour {package_id}: {str(e)}")
+            return {
+                "EC": 2,
+                "EM": f"Error cancelling tour: {str(e)}",
+                "cancelled_bookings": 0
+            }
+
