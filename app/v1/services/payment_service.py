@@ -527,4 +527,337 @@ class PaymentService:
                 "data": None,
                 "total": 0
             }
+    
+    # ================== ADMIN PAYMENT METHODS ==================
+    
+    async def create_payment_by_admin(
+        self,
+        booking_id: str,
+        admin_id: str,
+        payment_method: str = "bank_transfer",
+        transaction_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Tạo payment thủ công bởi admin (bypass VNPay)
+        
+        Args:
+            booking_id: ID của booking
+            admin_id: ID của admin tạo payment
+            payment_method: Phương thức thanh toán
+            transaction_id: Mã giao dịch (optional)
+            
+        Returns:
+            Dict with EC, EM, data
+        """
+        try:
+            # 1. Kiểm tra booking tồn tại và lấy thông tin
+            booking_result = self.supabase.table('bookings')\
+                .select('booking_id, total_amount, status, user_id')\
+                .eq('booking_id', booking_id)\
+                .execute()
+            
+            if not booking_result.data:
+                return {
+                    "EC": 1,
+                    "EM": "Booking not found",
+                    "data": None
+                }
+            
+            booking = booking_result.data[0]
+            
+            # 2. Validate booking status
+            if booking['status'] not in ['pending', 'confirmed']:
+                return {
+                    "EC": 2,
+                    "EM": f"Cannot create payment for booking with status '{booking['status']}'",
+                    "data": None
+                }
+            
+            # 3. Kiểm tra đã có payment completed chưa
+            existing_payment = self.supabase.table('payments')\
+                .select('payment_id, payment_status')\
+                .eq('booking_id', booking_id)\
+                .in_('payment_status', ['completed'])\
+                .execute()
+            
+            if existing_payment.data:
+                return {
+                    "EC": 3,
+                    "EM": "Payment already exists for this booking",
+                    "data": None
+                }
+            
+            # 4. Tạo payment với status completed
+            now = datetime.now(timezone.utc).isoformat()
+            payment_data = {
+                "booking_id": booking_id,
+                "amount": booking['total_amount'],
+                "payment_method": payment_method,
+                "payment_status": "completed",
+                "transaction_id": transaction_id,
+                "paid_at": now,
+                "created_by_admin_id": admin_id,
+                "created_at": now
+            }
+            
+            payment_result = self.supabase.table('payments')\
+                .insert(payment_data)\
+                .execute()
+            
+            if not payment_result.data:
+                return {
+                    "EC": 4,
+                    "EM": "Failed to create payment",
+                    "data": None
+                }
+            
+            # 5. Cập nhật booking status thành confirmed
+            self.supabase.table('bookings')\
+                .update({"status": "confirmed"})\
+                .eq('booking_id', booking_id)\
+                .execute()
+            
+            logger.info(f"Admin {admin_id} created payment for booking {booking_id}")
+            
+            return {
+                "EC": 0,
+                "EM": "Payment created successfully",
+                "data": payment_result.data[0]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating payment by admin: {str(e)}")
+            return {
+                "EC": 5,
+                "EM": f"Error: {str(e)}",
+                "data": None
+            }
+    
+    async def refund_payment_by_admin(
+        self,
+        payment_id: str,
+        admin_id: str,
+        refund_reason: str
+    ) -> Dict[str, Any]:
+        """
+        Hoàn tiền payment bởi admin
+        
+        Args:
+            payment_id: ID của payment cần hoàn tiền
+            admin_id: ID của admin thực hiện hoàn tiền
+            refund_reason: Lý do hoàn tiền
+            
+        Returns:
+            Dict with EC, EM, data
+        """
+        try:
+            # 1. Lấy thông tin payment
+            payment_result = self.supabase.table('payments')\
+                .select('payment_id, booking_id, amount, payment_status, refunded_at')\
+                .eq('payment_id', payment_id)\
+                .execute()
+            
+            if not payment_result.data:
+                return {
+                    "EC": 1,
+                    "EM": "Payment not found",
+                    "data": None
+                }
+            
+            payment = payment_result.data[0]
+            
+            # 2. Validate payment status
+            if payment['payment_status'] != 'completed':
+                return {
+                    "EC": 2,
+                    "EM": f"Cannot refund payment with status '{payment['payment_status']}'",
+                    "data": None
+                }
+            
+            # 3. Kiểm tra đã refund chưa
+            if payment['refunded_at'] is not None:
+                return {
+                    "EC": 3,
+                    "EM": "Payment already refunded",
+                    "data": None
+                }
+            
+            # 4. Lấy thông tin booking
+            booking_result = self.supabase.table('bookings')\
+                .select('booking_id, status')\
+                .eq('booking_id', payment['booking_id'])\
+                .execute()
+            
+            if not booking_result.data:
+                return {
+                    "EC": 4,
+                    "EM": "Booking not found",
+                    "data": None
+                }
+            
+            booking = booking_result.data[0]
+            
+            # 5. Validate booking status (không refund nếu đã cancelled hoặc completed)
+            if booking['status'] in ['cancelled', 'completed']:
+                return {
+                    "EC": 5,
+                    "EM": f"Cannot refund payment for booking with status '{booking['status']}'",
+                    "data": None
+                }
+            
+            # 6. Update payment với thông tin refund
+            now = datetime.now(timezone.utc).isoformat()
+            refund_data = {
+                "payment_status": "refunded",
+                "refunded_by": admin_id,
+                "refunded_at": now,
+                "refund_amount": payment['amount'],
+                "refund_reason": refund_reason
+            }
+            
+            refund_result = self.supabase.table('payments')\
+                .update(refund_data)\
+                .eq('payment_id', payment_id)\
+                .execute()
+            
+            if not refund_result.data:
+                return {
+                    "EC": 6,
+                    "EM": "Failed to refund payment",
+                    "data": None
+                }
+            
+            # 7. Update booking status về pending
+            self.supabase.table('bookings')\
+                .update({"status": "pending"})\
+                .eq('booking_id', payment['booking_id'])\
+                .execute()
+            
+            logger.info(f"Admin {admin_id} refunded payment {payment_id} for booking {payment['booking_id']}")
+            
+            return {
+                "EC": 0,
+                "EM": "Payment refunded successfully",
+                "data": refund_result.data[0]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error refunding payment by admin: {str(e)}")
+            return {
+                "EC": 7,
+                "EM": f"Error: {str(e)}",
+                "data": None
+            }
+    
+    async def get_all_payments_admin(
+        self,
+        status: Optional[str] = None,
+        user_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Lấy danh sách tất cả payments cho admin với thông tin chi tiết
+        
+        Args:
+            status: Filter theo payment_status
+            user_id: Filter theo user_id
+            limit: Số lượng kết quả tối đa
+            offset: Bỏ qua số lượng bản ghi
+            
+        Returns:
+            Dict with EC, EM, data, total
+        """
+        try:
+            # Build query with joins
+            query = self.supabase.table('payments')\
+                .select(
+                    """
+                    payment_id,
+                    booking_id,
+                    amount,
+                    payment_method,
+                    payment_status,
+                    transaction_id,
+                    paid_at,
+                    created_at,
+                    created_by_admin_id,
+                    refunded_by,
+                    refunded_at,
+                    bookings(
+                        user_id,
+                        contact_phone,
+                        contact_email,
+                        tour_packages(
+                            package_name,
+                            start_date
+                        )
+                    )
+                    """,
+                    count='exact'
+                )
+            
+            # Apply filters
+            if status:
+                query = query.eq('payment_status', status)
+            
+            if user_id:
+                query = query.eq('bookings.user_id', user_id)
+            
+            # Apply pagination
+            if limit:
+                query = query.limit(limit)
+            if offset:
+                query = query.offset(offset)
+            
+            # Order by created_at descending
+            query = query.order('created_at', desc=True)
+            
+            result = query.execute()
+            
+            # Format data - flatten nested structure
+            formatted_data = []
+            for payment in result.data:
+                booking = payment.get('bookings', {}) or {}
+                tour_pkg = booking.get('tour_packages', {}) or {}
+                
+                # Handle if tour_packages is a list
+                if isinstance(tour_pkg, list):
+                    tour_pkg = tour_pkg[0] if tour_pkg else {}
+                
+                formatted_data.append({
+                    "payment_id": payment['payment_id'],
+                    "booking_id": payment['booking_id'],
+                    "user_id": booking.get('user_id'),
+                    "amount": payment['amount'],
+                    "payment_method": payment['payment_method'],
+                    "payment_status": payment['payment_status'],
+                    "transaction_id": payment.get('transaction_id'),
+                    "paid_at": payment.get('paid_at'),
+                    "created_at": payment['created_at'],
+                    "tour_name": tour_pkg.get('package_name') if isinstance(tour_pkg, dict) else None,
+                    "start_date": tour_pkg.get('start_date') if isinstance(tour_pkg, dict) else None,
+                    "user_name": None,  # Would need to join users table separately
+                    "contact_phone": booking.get('contact_phone'),
+                    "contact_email": booking.get('contact_email'),
+                    "created_by_admin_id": payment.get('created_by_admin_id'),
+                    "refunded_by": payment.get('refunded_by'),
+                    "refunded_at": payment.get('refunded_at')
+                })
+            
+            return {
+                "EC": 0,
+                "EM": "Success",
+                "data": formatted_data,
+                "total": result.count
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting all payments for admin: {str(e)}")
+            return {
+                "EC": 1,
+                "EM": f"Error: {str(e)}",
+                "data": None,
+                "total": 0
+            }
 

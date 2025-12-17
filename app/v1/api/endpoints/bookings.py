@@ -153,7 +153,7 @@ async def cancel_booking(
     """
     Hủy một booking (soft delete - chuyển status thành 'cancelled')
     
-    - Chỉ có thể hủy booking có status 'pending' hoặc 'confirmed'
+    - Chỉ có thể hủy booking có status 'otp_sent', 'pending' hoặc 'confirmed'
     - Lưu lại lịch sử hủy vào bảng booking_cancellations
     - Hoàn trả lại số slot cho tour package
     
