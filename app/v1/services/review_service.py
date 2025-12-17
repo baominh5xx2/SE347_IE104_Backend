@@ -385,6 +385,12 @@ class ReviewService:
                     "data": None
                 }
             
+            # When user (not admin) updates review content, reset approval status
+            # Admin needs to re-approve the modified review
+            if not is_admin and ('rating' in update_data or 'comment' in update_data):
+                update_data['is_approved'] = False
+                logger.info(f"Review {review_id} approval reset due to content change by user")
+            
             # Add updated_at timestamp
             update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
             
