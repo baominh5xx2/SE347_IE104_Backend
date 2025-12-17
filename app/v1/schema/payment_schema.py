@@ -105,3 +105,95 @@ class VNPayIPNResponse(BaseModel):
     RspCode: str = Field(..., description="Response code: 00=success, 97=invalid signature, etc.")
     Message: str = Field(..., description="Response message")
 
+
+# ================== ADMIN PAYMENT SCHEMAS ==================
+
+class AdminPaymentCreate(BaseModel):
+    """Schema for admin manual payment creation"""
+    booking_id: UUID = Field(..., description="ID của booking cần tạo payment")
+    payment_method: str = Field(default="bank_transfer", description="Phương thức thanh toán (bank_transfer, momo, vnpay, zalopay)")
+    transaction_id: Optional[str] = Field(None, description="Mã giao dịch (nếu có)")
+    notes: Optional[str] = Field(None, description="Ghi chú của admin")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "booking_id": "07e8c89e-90d4-4ebc-9302-384dc6cb2f0c",
+                "payment_method": "bank_transfer",
+                "transaction_id": "BANK123456",
+                "notes": "Khách chuyển khoản ngân hàng"
+            }
+        }
+    )
+
+
+class AdminPaymentRefund(BaseModel):
+    """Schema for admin payment refund"""
+    refund_reason: str = Field(..., description="Lý do hoàn tiền")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "refund_reason": "Khách yêu cầu hủy do có việc đột xuất"
+            }
+        }
+    )
+
+
+class AdminPaymentResponse(PaymentResponse):
+    """Extended payment response with admin tracking info"""
+    created_by_admin_id: Optional[str] = Field(None, description="Admin ID đã tạo payment thủ công")
+    refunded_by: Optional[str] = Field(None, description="Admin ID đã hoàn tiền")
+    refunded_at: Optional[datetime] = Field(None, description="Thời gian hoàn tiền")
+    refund_amount: Optional[float] = Field(None, description="Số tiền đã hoàn")
+    refund_reason: Optional[str] = Field(None, description="Lý do hoàn tiền")
+
+
+class AdminPaymentCreateResponse(BaseModel):
+    """Response schema for admin payment creation"""
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[AdminPaymentResponse] = None
+
+
+class AdminPaymentRefundResponse(BaseModel):
+    """Response schema for admin payment refund"""
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[AdminPaymentResponse] = None
+
+
+class AdminPaymentListItem(BaseModel):
+    """Schema for payment item in admin list with full details"""
+    payment_id: UUID
+    booking_id: UUID
+    user_id: Optional[UUID] = None
+    # Payment info
+    amount: float
+    payment_method: str
+    payment_status: str
+    transaction_id: Optional[str] = None
+    paid_at: Optional[datetime] = None
+    created_at: datetime
+    # Tour info
+    tour_name: Optional[str] = None
+    start_date: Optional[str] = None
+    # User/Contact info
+    user_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_email: Optional[str] = None
+    # Admin tracking
+    created_by_admin_id: Optional[str] = None
+    refunded_by: Optional[str] = None
+    refunded_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminPaymentListResponse(BaseModel):
+    """Response schema for admin payment list"""
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[list[AdminPaymentListItem]] = None
+    total: Optional[int] = None
+

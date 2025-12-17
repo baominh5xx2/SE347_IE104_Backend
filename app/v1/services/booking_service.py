@@ -411,6 +411,11 @@ class BookingService:
         Cancel a booking (soft delete - update status to 'cancelled')
         Also inserts record to booking_cancellations table and restores slots.
         
+        Can cancel bookings with status: 'otp_sent', 'pending', or 'confirmed'
+        - 'otp_sent': User created booking but hasn't verified OTP yet
+        - 'pending': Booking confirmed, waiting for payment
+        - 'confirmed': Booking fully confirmed
+        
         Args:
             booking_id: UUID of the booking
             reason: Optional cancellation reason
@@ -435,8 +440,8 @@ class BookingService:
                     "data": None
                 }
             
-            # Check if can be cancelled (only pending/confirmed)
-            if booking['status'] not in ['pending', 'confirmed']:
+            # Check if can be cancelled (otp_sent, pending, or confirmed)
+            if booking['status'] not in ['otp_sent', 'pending', 'confirmed']:
                 return {
                     "EC": 4,
                     "EM": f"Cannot cancel booking with status '{booking['status']}'",

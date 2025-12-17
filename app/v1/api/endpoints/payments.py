@@ -13,12 +13,17 @@ from ...schema.payment_schema import (
     PaymentCreateResponse,
     PaymentStatusResponse,
     PaymentListResponse,
-    VNPayIPNResponse
+    VNPayIPNResponse,
+    AdminPaymentCreate,
+    AdminPaymentCreateResponse,
+    AdminPaymentRefund,
+    AdminPaymentRefundResponse,
+    AdminPaymentListResponse
 )
 from ...services.payment_service import PaymentService
 from ...services.vnpay_service import VNPayService
 from ...core.supabase import get_supabase_client
-from ...core.dependencies import get_current_user
+from ...core.dependencies import get_current_user, get_current_admin
 from ...core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -289,6 +294,182 @@ async def get_my_payments(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ================== ADMIN PAYMENT ENDPOINTS ==================
+
+@router.post("/admin/create", response_model=AdminPaymentCreateResponse)
+async def create_payment_by_admin(
+    payment: AdminPaymentCreate,
+    current_admin: dict = Depends(get_current_admin),
+    service: PaymentService = Depends(get_payment_service)
+):
+    """
+    Tạo payment thủ công bởi admin (bypass VNPay flow)
+    
+    - REQUIRE ADMIN AUTHENTICATION
+    - Tự động lấy số tiền từ booking.total_amount
+    - Tạo payment với status 'completed' ngay lập tức
+    - Cập nhật booking status thành 'confirmed'
+    
+    Args:
+        payment: Admin payment data (booking_id, payment_method, transaction_id, notes)
+        current_admin: Admin info từ authentication
+        service: Payment service instance
+        
+    Returns:
+        AdminPaymentCreateResponse với thông tin payment đã tạo
+        
+    Example:
+        POST /api/v1/payments/admin/create
+        Body: {
+            "booking_id": "uuid",
+            "payment_method": "bank_transfer",
+            "transaction_id": "BANK123456",
+            "notes": "Khách chuyển khoản ngân hàng"
+        }
+    """
+    try:
+        admin_id = current_admin.get("user_id")
+        
+        result = await service.create_payment_by_admin(
+            booking_id=str(payment.booking_id),
+            admin_id=admin_id,
+            payment_method=payment.payment_method,
+            transaction_id=payment.transaction_id
+        )
+        
+        if result["EC"] != 0:
+            status_codes = {
+                1: 404,  # Booking not found
+                2: 400,  # Invalid booking status
+                3: 409,  # Payment already exists
+                4: 500,  # Failed to create
+                5: 500   # Error
+            }
+            raise HTTPException(
+                status_code=status_codes.get(result["EC"], 400),
+                detail=result["EM"]
+            )
+        
+        return AdminPaymentCreateResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in create_payment_by_admin endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/{payment_id}/refund", response_model=AdminPaymentRefundResponse)
+async def refund_payment_by_admin(
+    payment_id: UUID,
+    refund: AdminPaymentRefund,
+    current_admin: dict = Depends(get_current_admin),
+    service: PaymentService = Depends(get_payment_service)
+):
+    """
+    Hoàn tiền payment bởi admin
+    
+    - REQUIRE ADMIN AUTHENTICATION
+    - Chỉ có thể refund payment với status 'completed'
+    - Không thể refund nếu đã refund trước đó
+    - Không thể refund nếu booking đã cancelled hoặc completed
+    - Update payment status thành 'refunded'
+    - Update booking status về 'pending'
+    
+    Args:
+        payment_id: UUID của payment cần hoàn tiền
+        refund: Refund data (refund_reason)
+        current_admin: Admin info từ authentication
+        service: Payment service instance
+        
+    Returns:
+        AdminPaymentRefundResponse với thông tin payment sau khi refund
+        
+    Example:
+        POST /api/v1/payments/admin/{payment_id}/refund
+        Body: {
+            "refund_reason": "Khách yêu cầu hủy do có việc đột xuất"
+        }
+    """
+    try:
+        admin_id = current_admin.get("user_id")
+        
+        result = await service.refund_payment_by_admin(
+            payment_id=str(payment_id),
+            admin_id=admin_id,
+            refund_reason=refund.refund_reason
+        )
+        
+        if result["EC"] != 0:
+            status_codes = {
+                1: 404,  # Payment not found
+                2: 400,  # Invalid payment status
+                3: 409,  # Already refunded
+                4: 404,  # Booking not found
+                5: 400,  # Invalid booking status
+                6: 500,  # Failed to refund
+                7: 500   # Error
+            }
+            raise HTTPException(
+                status_code=status_codes.get(result["EC"], 400),
+                detail=result["EM"]
+            )
+        
+        return AdminPaymentRefundResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in refund_payment_by_admin endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/admin/list", response_model=AdminPaymentListResponse)
+async def get_all_payments_admin(
+    status: Optional[str] = Query(None, description="Filter theo payment status (pending/completed/failed/refunded)"),
+    user_id: Optional[str] = Query(None, description="Filter theo user ID"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    current_admin: dict = Depends(get_current_admin),
+    service: PaymentService = Depends(get_payment_service)
+):
+    """
+    Lấy danh sách tất cả payments cho admin với thông tin chi tiết
+    
+    - REQUIRE ADMIN AUTHENTICATION
+    - Join với bookings và tour_packages để lấy thông tin đầy đủ
+    - Bao gồm: booking_id, tên tour, thời gian tour, user_id, contact info, payment info
+    
+    Args:
+        status: Filter theo payment_status
+        user_id: Filter theo user_id
+        limit: Số lượng kết quả tối đa
+        offset: Số bản ghi bỏ qua
+        current_admin: Admin info từ authentication
+        service: Payment service instance
+        
+    Returns:
+        AdminPaymentListResponse với danh sách payments và thông tin chi tiết
+        
+    Example:
+        GET /api/v1/payments/admin/list?status=completed&limit=20
+        GET /api/v1/payments/admin/list?user_id=uuid
+    """
+    try:
+        result = await service.get_all_payments_admin(
+            status=status,
+            user_id=user_id,
+            limit=limit,
+            offset=offset
+        )
+        
+        return AdminPaymentListResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"Error in get_all_payments_admin endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/booking/{booking_id}", response_model=PaymentStatusResponse)
 async def get_payment_by_booking(
     booking_id: UUID,
@@ -391,43 +572,5 @@ async def get_payment_status(
         raise
     except Exception as e:
         logger.error(f"Error in get_payment_status endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-async def get_my_payments(
-    status: Optional[str] = Query(None, description="Filter theo status (pending/completed/failed)"),
-    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
-    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
-    current_user: dict = Depends(get_current_user),
-    service: PaymentService = Depends(get_payment_service)
-):
-    """
-    Get payment history của user
-    
-    Args:
-        status: Filter theo status (pending/completed/failed)
-        limit: Số lượng kết quả tối đa
-        offset: Số bản ghi bỏ qua
-        current_user: Current authenticated user
-        service: PaymentService instance
-        
-    Returns:
-        PaymentListResponse với danh sách payments
-        
-    Example:
-        GET /api/v1/payments/my-payments?status=completed&limit=10
-    """
-    try:
-        user_id = current_user["user_id"]
-        
-        result = await service.get_user_payments(
-            user_id=user_id,
-            status=status,
-            limit=limit,
-            offset=offset
-        )
-        
-        return PaymentListResponse(**result)
-        
-    except Exception as e:
-        logger.error(f"Error in get_my_payments endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
