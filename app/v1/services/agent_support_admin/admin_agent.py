@@ -5,6 +5,7 @@ Loads config from admin_agent.yaml
 """
 import logging
 import json
+import re
 from typing import Dict, Any, Optional
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
@@ -67,7 +68,7 @@ class AdminAgent:
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Process admin query
+        Process admin query with ReAct loop (Multi-step)
         
         Args:
             query: Natural language query from admin
@@ -81,82 +82,122 @@ class AdminAgent:
             session_id = session_id or f"admin_{user_id}"
             memory = self.get_memory(session_id)
             
-            # Build messages
+            # 1. Build initial messages
             messages = [
                 SystemMessage(content=get_system_prompt()),
-                *memory.messages[-10:],  # Last 10 messages for context
+                *memory.messages[-10:],  # Context
                 HumanMessage(content=query)
             ]
             
-            # LLM decides what to do
-            logger.info(f"🤖 Admin Agent processing: {query[:50]}...")
-            response = await self.llm_with_tools.ainvoke(messages)
+            all_tool_results = []
+            final_response_content = ""
+            max_iterations = self.config.max_iterations
             
-            # Check if tool call is needed
-            if hasattr(response, 'tool_calls') and response.tool_calls:
-                # Execute tool calls and create proper ToolMessages
-                tool_results = []
-                tool_messages = []
+            # 2. ReAct Loop
+            for i in range(max_iterations):
+                logger.info(f"🔄 ReAct Iteration {i+1}/{max_iterations}")
                 
-                for tool_call in response.tool_calls:
-                    tool_name = tool_call.get('name')
-                    tool_args = tool_call.get('args', {})
-                    tool_call_id = tool_call.get('id', f"call_{tool_name}")
+                # Invoke LLM (WITH defined tools)
+                response = await self.llm_with_tools.ainvoke(messages)
+                
+                # Check for tool calls
+                if hasattr(response, 'tool_calls') and response.tool_calls:
+                    logger.info(f"🛠️ Tool calls detected: {len(response.tool_calls)}")
                     
-                    logger.info(f"🔧 Calling tool: {tool_name}")
-                    
-                    if tool_name in self.tools_by_name:
-                        tool = self.tools_by_name[tool_name]
-                        result = tool.invoke(tool_args)
-                        result_str = json.dumps(result, ensure_ascii=False, default=str)
-                        tool_results.append({
-                            "tool": tool_name,
-                            "result": result
-                        })
-                    else:
-                        result_str = json.dumps({"error": f"Unknown tool: {tool_name}"})
-                        tool_results.append({
-                            "tool": tool_name,
-                            "error": f"Unknown tool: {tool_name}"
-                        })
-                    
-                    # Create proper ToolMessage for OpenAI
-                    tool_messages.append(
-                        ToolMessage(
-                            content=result_str,
-                            tool_call_id=tool_call_id
+                    # Execute tools
+                    tool_messages = []
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call.get('name')
+                        tool_args = tool_call.get('args', {})
+                        tool_call_id = tool_call.get('id', f"call_{tool_name}")
+                        
+                        logger.info(f"🔧 Calling tool: {tool_name}")
+                        
+                        result_str = ""
+                        if tool_name in self.tools_by_name:
+                            tool = self.tools_by_name[tool_name]
+                            try:
+                                result = tool.invoke(tool_args)
+                                # Append to global results
+                                all_tool_results.append({
+                                    "tool": tool_name,
+                                    "result": result
+                                })
+                                result_str = json.dumps(result, ensure_ascii=False, default=str)
+                            except Exception as e:
+                                error_msg = f"Error executing {tool_name}: {str(e)}"
+                                logger.error(error_msg)
+                                result_str = json.dumps({"error": error_msg})
+                                all_tool_results.append({
+                                    "tool": tool_name,
+                                    "error": error_msg
+                                })
+                        else:
+                            msg = f"Unknown tool: {tool_name}"
+                            result_str = json.dumps({"error": msg})
+                            all_tool_results.append({"tool": tool_name, "error": msg})
+                        
+                        # Create ToolMessage
+                        tool_messages.append(
+                            ToolMessage(
+                                content=result_str,
+                                tool_call_id=tool_call_id
+                            )
                         )
-                    )
+                    
+                    # Append AIMessage (with tool_calls) and ToolMessages to history
+                    messages.append(response)
+                    messages.extend(tool_messages)
+                    
+                    # CONTINUE LOOP to let LLM process results
+                    continue
                 
-                # Build final messages with proper tool responses
-                final_messages = messages + [response] + tool_messages
-                
-                # Get final response from LLM
-                final_response = await self.llm.ainvoke(final_messages)
-                
-                # Store in memory
-                memory.add_user_message(query)
-                memory.add_ai_message(final_response.content)
-                
-                return {
-                    "success": True,
-                    "response": final_response.content,
-                    "tool_calls": tool_results,
-                    "query": query
-                }
+                else:
+                    # No tool calls -> Final Answer
+                    logger.info("✅ Final answer received")
+                    final_response_content = response.content
+                    break
             
-            else:
-                # No tool call, direct response
-                memory.add_user_message(query)
-                memory.add_ai_message(response.content)
-                
-                return {
-                    "success": True,
-                    "response": response.content,
-                    "tool_calls": [],
-                    "query": query
-                }
-                
+            # Check if loop exhausted without final answer
+            if not final_response_content and i == max_iterations - 1:
+                logger.warning("⚠️ Max iterations reached without final answer")
+                final_response_content = "Tôi không thể xử lý yêu cầu này sau nhiều bước. Vui lòng thử lại cụ thể hơn."
+
+            # 3. Cleanup and Response
+            response_text = final_response_content
+            if hasattr(final_response_content, 'content'): # Should be string, but safety check
+                response_text = final_response_content.content
+            
+            response_text = str(response_text)
+            
+            # Line-based cleanup for artifacts (still good to have)
+            if "type: ChatGeneration" in response_text or '{"sql_query":' in response_text or '{"success":' in response_text:
+                 logger.warning("⚠️ Cleaning artifacts from final response...")
+                 lines = response_text.split('\n')
+                 clean_lines = []
+                 for line in lines:
+                     stripped = line.strip()
+                     if (stripped.startswith('type: ChatGeneration') or 
+                         stripped.startswith('llm_output:') or
+                         '{"sql_query":' in stripped or 
+                         '{"success":' in stripped or
+                         '"completion_tokens":' in stripped):
+                         continue
+                     clean_lines.append(line)
+                 response_text = '\n'.join(clean_lines).strip()
+
+            # Save to Memory (User Query + Final Answer)
+            # We do NOT save the intermediate tool steps to long-term memory to save context
+            memory.add_user_message(query)
+            memory.add_ai_message(response_text)
+            
+            return {
+                "success": True,
+                "response": response_text,
+                "tool_calls": all_tool_results,
+                "query": query
+            }
+            
         except Exception as e:
             logger.error(f"❌ Admin Agent error: {str(e)}")
             return {
