@@ -12,6 +12,8 @@ from ...schema.booking_schema import (
     BookingDetailResponse,
     BookingUpdateResponse,
     BookingDeleteResponse,
+    BookingCancelRequest,
+    BookingCancelResponse,
     BookingCreateWithOTP,
     VerifyOTPRequest,
     BookingOTPResponse,
@@ -142,13 +144,62 @@ async def update_booking(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{booking_id}/cancel", response_model=BookingCancelResponse)
+async def cancel_booking(
+    booking_id: UUID,
+    cancel_request: BookingCancelRequest = None,
+    service: BookingService = Depends(get_booking_service)
+):
+    """
+    Hủy một booking (soft delete - chuyển status thành 'cancelled')
+    
+    - Chỉ có thể hủy booking có status 'pending' hoặc 'confirmed'
+    - Lưu lại lịch sử hủy vào bảng booking_cancellations
+    - Hoàn trả lại số slot cho tour package
+    
+    Args:
+        booking_id: UUID của booking cần hủy
+        cancel_request: Lý do hủy (optional)
+        service: Booking service instance
+        
+    Returns:
+        BookingCancelResponse với thông tin booking sau khi hủy
+        
+    Example:
+        POST /api/v1/bookings/123e4567-e89b-12d3-a456-426614174000/cancel
+        Body: {"reason": "Có việc bận không thể đi được"}
+    """
+    try:
+        reason = cancel_request.reason if cancel_request else None
+        result = await service.cancel_booking(str(booking_id), reason=reason, cancelled_by="user")
+        
+        if result["EC"] == 1:
+            raise HTTPException(status_code=404, detail=result["EM"])
+        elif result["EC"] == 3:
+            raise HTTPException(status_code=400, detail=result["EM"])  # Already cancelled
+        elif result["EC"] == 4:
+            raise HTTPException(status_code=400, detail=result["EM"])  # Invalid status
+        elif result["EC"] != 0:
+            raise HTTPException(status_code=400, detail=result["EM"])
+        
+        return BookingCancelResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in cancel_booking endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/{booking_id}", response_model=BookingDeleteResponse)
 async def delete_booking(
     booking_id: UUID,
     service: BookingService = Depends(get_booking_service)
 ):
     """
-    Xóa một booking (và hoàn trả lại số slot cho tour package)
+    Xóa một booking - DEPRECATED, sử dụng POST /{booking_id}/cancel thay thế
+    
+    Endpoint này giờ chỉ gọi cancel_booking để soft delete.
     
     Args:
         booking_id: UUID của booking cần xóa

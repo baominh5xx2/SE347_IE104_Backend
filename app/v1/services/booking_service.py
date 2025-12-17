@@ -401,15 +401,23 @@ class BookingService:
                 "data": None
             }
     
-    async def delete_booking(self, booking_id: str) -> Dict[str, Any]:
+    async def cancel_booking(
+        self, 
+        booking_id: str, 
+        reason: Optional[str] = None,
+        cancelled_by: str = "user"
+    ) -> Dict[str, Any]:
         """
-        Delete a booking (and restore package slots)
+        Cancel a booking (soft delete - update status to 'cancelled')
+        Also inserts record to booking_cancellations table and restores slots.
         
         Args:
             booking_id: UUID of the booking
+            reason: Optional cancellation reason
+            cancelled_by: Who cancelled - 'user', 'admin', or 'system'
             
         Returns:
-            Dict with EC and EM
+            Dict with EC, EM, and data
         """
         try:
             # Get booking data first
@@ -419,47 +427,105 @@ class BookingService:
             
             booking = existing["data"]
             
-            # Delete booking
-            result = self.supabase.table('bookings') \
-                .delete() \
+            # Check if already cancelled
+            if booking['status'] == 'cancelled':
+                return {
+                    "EC": 3,
+                    "EM": "Booking is already cancelled",
+                    "data": None
+                }
+            
+            # Check if can be cancelled (only pending/confirmed)
+            if booking['status'] not in ['pending', 'confirmed']:
+                return {
+                    "EC": 4,
+                    "EM": f"Cannot cancel booking with status '{booking['status']}'",
+                    "data": None
+                }
+            
+            # 1. Insert to booking_cancellations table (full booking snapshot)
+            cancellation_data = {
+                "booking_id": booking_id,
+                "user_id": booking['user_id'],
+                "package_id": booking['package_id'],
+                # Booking snapshot
+                "number_of_people": booking['number_of_people'],
+                "total_amount": booking.get('total_amount'),
+                "contact_name": booking.get('contact_name'),
+                "contact_phone": booking.get('contact_phone'),
+                "contact_email": booking.get('contact_email'),
+                "special_requests": booking.get('special_requests'),
+                "previous_status": booking['status'],  # Status before cancel
+                "promotion_id": booking.get('promotion_id'),
+                "booking_created_at": booking.get('created_at'),
+                # Cancellation info
+                "reason": reason,
+                "cancelled_by": cancelled_by
+            }
+            
+            self.supabase.table('booking_cancellations') \
+                .insert(cancellation_data) \
+                .execute()
+            
+            # 2. Update booking status to cancelled (soft delete)
+            update_result = self.supabase.table('bookings') \
+                .update({"status": "cancelled", "updated_at": "now()"}) \
                 .eq('booking_id', booking_id) \
                 .execute()
             
-            if not result.data:
+            if not update_result.data:
                 return {
                     "EC": 1,
-                    "EM": "Failed to delete booking"
+                    "EM": "Failed to cancel booking"
                 }
             
-            # Restore package slots if booking was pending or confirmed
-            if booking['status'] in ['pending', 'confirmed']:
-                package_result = self.supabase.table('tour_packages') \
-                    .select('available_slots') \
+            # 3. Restore package slots
+            package_result = self.supabase.table('tour_packages') \
+                .select('available_slots') \
+                .eq('package_id', booking['package_id']) \
+                .execute()
+            
+            if package_result.data:
+                current_slots = package_result.data[0]['available_slots']
+                new_slots = current_slots + booking['number_of_people']
+                
+                self.supabase.table('tour_packages') \
+                    .update({"available_slots": new_slots}) \
                     .eq('package_id', booking['package_id']) \
                     .execute()
                 
-                if package_result.data:
-                    current_slots = package_result.data[0]['available_slots']
-                    new_slots = current_slots + booking['number_of_people']
-                    
-                    self.supabase.table('tour_packages') \
-                        .update({"available_slots": new_slots}) \
-                        .eq('package_id', booking['package_id']) \
-                        .execute()
+                logger.info(f"Restored {booking['number_of_people']} slots to package {booking['package_id']}")
             
-            logger.info(f"Deleted booking {booking_id}")
+            logger.info(f"Cancelled booking {booking_id} by {cancelled_by}")
             
             return {
                 "EC": 0,
-                "EM": "Booking deleted successfully"
+                "EM": "Booking cancelled successfully",
+                "data": update_result.data[0]
             }
             
         except Exception as e:
-            logger.error(f"Error deleting booking {booking_id}: {str(e)}")
+            logger.error(f"Error cancelling booking {booking_id}: {str(e)}")
             return {
                 "EC": 2,
-                "EM": f"Error deleting booking: {str(e)}"
+                "EM": f"Error cancelling booking: {str(e)}",
+                "data": None
             }
+    
+    async def delete_booking(self, booking_id: str) -> Dict[str, Any]:
+        """
+        Delete a booking - DEPRECATED, use cancel_booking instead
+        This now calls cancel_booking for backward compatibility
+        
+        Args:
+            booking_id: UUID of the booking
+            
+        Returns:
+            Dict with EC and EM
+        """
+        logger.warning(f"delete_booking is deprecated, use cancel_booking instead. Booking: {booking_id}")
+        result = await self.cancel_booking(booking_id, reason="Deleted via deprecated method", cancelled_by="system")
+        return result
     
     async def create_booking_with_otp(self, booking_data: Dict[str, Any]) -> Dict[str, Any]:
         """

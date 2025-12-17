@@ -115,6 +115,26 @@ class BookingDeleteResponse(BaseModel):
     EM: str = Field(..., description="Error message")
 
 
+class BookingCancelRequest(BaseModel):
+    """Schema for cancelling a booking"""
+    reason: Optional[str] = Field(None, max_length=500, description="Lý do hủy booking")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "reason": "Có việc bận không thể đi được"
+            }
+        }
+    )
+
+
+class BookingCancelResponse(BaseModel):
+    """Response schema for booking cancellation"""
+    EC: int = Field(..., description="Error code (0 = success)")
+    EM: str = Field(..., description="Error message")
+    data: Optional[BookingResponse] = None
+
+
 # ============================================
 # Schemas for UC-USER-03: Quản lý Tour Đã Đăng Ký
 # ============================================
