@@ -19,8 +19,10 @@ from ...schema.review_schema import (
     ReviewApproveResponse
 )
 from ...services.review_service import ReviewService
+from ...services.booking_management_service import BookingManagementService
 from ...core.supabase import get_supabase_client
 from ...core.dependencies import get_current_user, get_current_admin
+from ...schema.booking_schema import MyBookingListResponse
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,12 @@ def get_review_service():
     """Dependency to get ReviewService instance"""
     supabase = get_supabase_client()
     return ReviewService(supabase)
+
+
+def get_booking_management_service():
+    """Dependency to get BookingManagementService instance"""
+    supabase = get_supabase_client()
+    return BookingManagementService(supabase)
 
 
 @router.get("/", response_model=ReviewListResponse)
@@ -75,6 +83,67 @@ async def get_reviews(
         
     except Exception as e:
         logger.error(f"Error in get_reviews endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/my-reviews", response_model=ReviewListResponse)
+async def get_my_reviews(
+    current_user: dict = Depends(get_current_user),
+    service: ReviewService = Depends(get_review_service)
+):
+    """
+    Lấy danh sách reviews của user hiện tại (yêu cầu authentication)
+    
+    Args:
+        current_user: User hiện tại (từ authentication)
+        service: Review service instance
+        
+    Returns:
+        ReviewListResponse với danh sách reviews của user
+        
+    Example:
+        GET /api/v1/reviews/my-reviews
+    """
+    try:
+        user_id = current_user.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not found in token")
+        
+        result = await service.get_all_reviews(user_id=str(user_id))
+        return ReviewListResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_my_reviews endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/my-reviewable-bookings", response_model=MyBookingListResponse)
+async def get_my_reviewable_bookings(
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
+    offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    current_user: dict = Depends(get_current_user),
+    service: BookingManagementService = Depends(get_booking_management_service),
+):
+    """Lấy danh sách bookings của user hiện tại có status='completed' để có thể review."""
+    try:
+        user_id = current_user.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not found in token")
+
+        result = await service.get_user_bookings(
+            user_id=str(user_id),
+            status="completed",
+            limit=limit,
+            offset=offset,
+        )
+        return MyBookingListResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_my_reviewable_bookings endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

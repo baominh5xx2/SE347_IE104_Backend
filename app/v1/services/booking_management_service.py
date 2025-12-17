@@ -43,7 +43,7 @@ class BookingManagementService:
         try:
             # Join với tour_packages để lấy thông tin tour
             query = self.supabase.table('bookings')\
-                .select('booking_id, number_of_people, total_amount, status, created_at, tour_packages(package_name, destination, start_date, end_date)', count='exact')\
+                .select('booking_id, package_id, number_of_people, total_amount, status, created_at, tour_packages(package_name, destination, start_date, end_date)', count='exact')\
                 .eq('user_id', user_id)
             
             # Apply status filter
@@ -73,6 +73,7 @@ class BookingManagementService:
                 
                 formatted_data.append({
                     "booking_id": booking['booking_id'],
+                    "package_id": booking['package_id'],
                     "tour_name": tour_pkg.get('package_name', 'Unknown Tour'),
                     "destination": tour_pkg.get('destination', 'Unknown'),
                     "start_date": tour_pkg.get('start_date'),
