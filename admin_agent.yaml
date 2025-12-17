@@ -1,0 +1,129 @@
+# Admin Agent Configuration
+# LangGraph-based agent for admin database queries
+
+system:
+  name: "Admin AI Agent"
+  version: "1.0.0"
+  description: "LangGraph agent for admin database queries with dynamic SQL via BigQuery tool"
+
+# LLM Configuration (Shared)
+llm:
+  provider: "openai"
+  model: "gpt-5-mini"
+  # Switch provider:
+  # - openai: use OPENAI_API_KEY
+  # - modal:  use MODAL_API_URL (OpenAI-compatible endpoint) + MODAL_API_KEY if needed
+  modal_api_url: "${MODAL_API_URL:-}"
+  temperature: 0.3
+  max_tokens: 1024
+  streaming: false
+  reasoning: {"effort": "low"}
+
+# Agent Configuration
+agent:
+  name: "admin_agent"
+  type: "langgraph"
+  description: "Admin agent with BigQuery tool for database queries"
+  max_iterations: 5
+  timeout: 60
+  
+  # System Prompt
+  prompts:
+    system: |
+      Bạn là Admin AI Assistant chuyên hỗ trợ quản lý hệ thống đặt tour du lịch.
+
+      ## Khả năng của bạn:
+      1. **Query Database**: Tạo SQL queries để lấy thống kê, báo cáo từ database
+      2. **Phân tích dữ liệu**: Phân tích bookings, users, payments, tours
+      3. **Generate Reports**: Tạo báo cáo theo yêu cầu
+
+      ## Database Schema:
+      - **tour_packages**: package_id, package_name, destination, price, duration_days, available_slots, start_date, end_date, is_active, created_at
+      - **bookings**: booking_id, package_id, user_id, number_of_people, total_amount, status (pending/confirmed/cancelled/completed), created_at
+      - **users**: user_id, email, full_name, phone_number, role (user/admin), is_active, created_at, last_access_time
+      - **payments**: payment_id, booking_id, user_id, amount, payment_status, payment_method, created_at
+      - **reviews**: review_id, package_id, user_id, rating (1-5), comment, created_at
+      - **promotions**: promotion_id, code, discount_type, discount_value, is_active, start_date, end_date
+
+      ## Quy tắc:
+      1. Chỉ tạo SELECT queries, KHÔNG được INSERT/UPDATE/DELETE
+      2. Luôn limit kết quả (mặc định 100 rows)
+      3. Sử dụng aggregate functions khi cần: COUNT, SUM, AVG, MAX, MIN
+      4. Format kết quả dễ đọc cho admin
+
+      ## Ví dụ queries:
+      - "Thống kê booking tháng này" → SELECT với GROUP BY month
+      - "Top 5 tour được đặt nhiều nhất" → SELECT với COUNT và ORDER BY DESC LIMIT 5
+      - "Revenue theo từng tour" → SELECT SUM(total_amount) GROUP BY package_id
+    
+    sql_generation: |
+      Dựa vào yêu cầu của admin, hãy tạo SQL query phù hợp.
+      Yêu cầu: {user_query}
+      Quy tắc:
+      1. Chỉ SELECT, không INSERT/UPDATE/DELETE
+      2. Limit tối đa 100 rows nếu không có limit cụ thể
+      3. Sử dụng JOINs khi cần lấy data từ nhiều tables
+    
+    result_formatting: |
+      Format kết quả query thành response dễ đọc cho admin.
+      Query: {sql_query}
+      Kết quả: {query_result}
+      Hãy tóm tắt và highlight số liệu quan trọng.
+
+# Workflow Configuration (LangGraph)
+workflow:
+  type: "langgraph_agent"
+  pattern: "agent_with_tool_calling_loop"
+  
+  # Graph nodes
+  nodes:
+    - name: "admin_llm"
+      description: "LLM decides whether to call query_database tool or respond"
+      enabled: true
+    - name: "admin_tools"
+      description: "Execute query_database tool"
+      enabled: true
+  
+  # Graph flow: START → admin_llm → (tool_calls? → admin_tools → admin_llm) → END
+
+# Tools Configuration
+tools:
+  - name: "query_database"
+    description: "Execute SELECT query on database via Supabase RPC"
+    parameters:
+      sql_query:
+        type: "string"
+        required: true
+        description: "SQL SELECT statement to execute"
+      explanation:
+        type: "string"
+        required: false
+        description: "Brief explanation of query purpose"
+    
+    # Available tables
+    allowed_tables:
+      - tour_packages
+      - bookings
+      - users
+      - payments
+      - reviews
+      - promotions
+    
+    # Security rules
+    security:
+      allowed_operations: ["SELECT", "WITH"]
+      blocked_keywords: ["INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE", "ALTER", "CREATE"]
+      max_limit: 100
+
+# Memory Configuration
+memory:
+  type: "session_buffer"
+  max_history: 10
+  storage: "in_memory"
+
+# Capabilities
+capabilities:
+  - database_querying
+  - natural_language_sql
+  - data_analysis
+  - report_generation
