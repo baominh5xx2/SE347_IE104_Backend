@@ -4,12 +4,14 @@ Interactive booking collection và management
 """
 from fastmcp import FastMCP
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import random
 from app.v1.core.supabase import get_supabase_client
 from app.v1.services.otp_service import get_otp_service
 from app.v1.services.payment_service import PaymentService
+from app.v1.services.booking_service import BookingService
+from app.v1.core.config import settings
 from app.v1.services.agent_services.utils.ui_generator import generate_payment_button_html
 from pydantic import ValidationError
 from app.v1.mcp.src.schema import (
@@ -18,6 +20,7 @@ from app.v1.mcp.src.schema import (
     DeleteBookingInput,
     GetUserBookingsInput,
     VerifyOTPInput,
+    ResendOTPInput,
     CreatePaymentInput,
     ApplyPromotionCodeInput
 )
@@ -107,8 +110,8 @@ async def _create_booking_impl(
             "contact_email": user_email,  # store email on booking
             "special_requests": special_requests or "",
             "status": "otp_sent",
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
         }
         
         booking_res = supabase.table("bookings").insert(booking_data).execute()
@@ -125,9 +128,9 @@ async def _create_booking_impl(
         otp_data = {
             "booking_id": booking_id,
             "otp_code": otp_code,
-            "phone_number": user_phone
+            "phone_number": user_phone,
+            "created_at": datetime.now(timezone.utc).isoformat()
             # expires_at sẽ tự động set bởi trigger (created_at + 5 phút)
-            # Note: user_id không có trong schema otp_verifications table
         }
         try:
             otp_insert_res = supabase.table("otp_verifications").insert(otp_data).execute()
@@ -143,16 +146,33 @@ async def _create_booking_impl(
             return {"success": False, "error": f"Failed to create OTP: {str(e)}"}
         
         # 6. Gửi OTP qua email bằng SendGrid
-        otp_service = get_otp_service()
-        email_sent = otp_service.send_otp_email(
-            email=user_email,
-            otp=otp_code,
-            tour_name=package['package_name']
-        )
-        
-        if not email_sent:
-            logger.warning(f"⚠️ Failed to send OTP email to {user_email}, but booking and OTP record created. OTP code: {otp_code}")
-            logger.warning("⚠️ User can still verify OTP manually if they know the code, but email notification failed.")
+        try:
+            otp_service = get_otp_service()
+            
+            # Check if SendGrid client is available
+            if not otp_service.sendgrid_client:
+                logger.error(f"❌ SendGrid client not initialized. Check SENDGRID_API_KEY in .env")
+                logger.error(f"   SENDGRID_API_KEY configured: {bool(settings.SENDGRID_API_KEY)}")
+                logger.error(f"   SENDGRID_FROM_EMAIL: {settings.SENDGRID_FROM_EMAIL}")
+            else:
+                logger.info(f"📧 Attempting to send OTP email to {user_email} via SendGrid")
+                email_sent = otp_service.send_otp_email(
+                    email=user_email,
+                    otp=otp_code,
+                    tour_name=package['package_name']
+                )
+                
+                if email_sent:
+                    logger.info(f"✅ OTP email sent successfully to {user_email}")
+                else:
+                    logger.warning(f"⚠️ Failed to send OTP email to {user_email}, but booking and OTP record created. OTP code: {otp_code}")
+                    logger.warning("⚠️ User can still verify OTP manually if they know the code, but email notification failed.")
+        except Exception as e:
+            logger.error(f"❌ Exception while sending OTP email: {str(e)}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            logger.warning(f"⚠️ Booking created but OTP email failed. OTP code: {otp_code}")
 
         # 7. Update Slots
         new_slots = package['available_slots'] - number_of_people
@@ -162,8 +182,8 @@ async def _create_booking_impl(
         return {
             "success": True,
             "booking_id": booking_id,
-            "message": "📧 Mã OTP đã được gửi về email của bạn. Vui lòng kiểm tra email và nhập mã OTP để xác nhận đặt tour.",
             "awaiting_otp": True,
+            "message": f"📧 Mã xác thực đã được gửi tới email {user_email}. Vui lòng kiểm tra và cung cấp mã OTP để hoàn tất đặt tour.",
             "confirmation": {
                 "booking_id": booking_id,
                 "tour_name": package['package_name'],
@@ -599,6 +619,32 @@ def register_booking_tools(mcp: FastMCP):
             logger.error(f"Verify OTP error: {str(e)}")
             return {"success": False, "error": f"System error: {str(e)}"}
 
+    async def _resend_otp_impl(booking_id: str) -> Dict[str, Any]:
+        """Resend OTP for a booking"""
+        try:
+            supabase = get_supabase_client()
+            booking_service = BookingService(supabase)
+            
+            # Call BookingService.resend_otp
+            result = await booking_service.resend_otp(booking_id)
+            
+            # Convert BookingService response format to MCP tool format
+            if result["EC"] == 0:
+                return {
+                    "success": True,
+                    "message": result["EM"],
+                    "booking_id": booking_id,
+                    "contact_email": result["data"].get("contact_email") if result.get("data") else None
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": result["EM"]
+                }
+        except Exception as e:
+            logger.error(f"Resend OTP error: {str(e)}")
+            return {"success": False, "error": f"System error: {str(e)}"}
+
     @mcp.tool()
     async def verify_otp_and_confirm_booking(
         booking_id: str,
@@ -617,6 +663,19 @@ def register_booking_tools(mcp: FastMCP):
                 booking_id=validated.booking_id,
                 otp_code=validated.otp_code
             )
+        except ValidationError as e:
+            return {"success": False, "error": f"Input Validation Error: {str(e)}"}
+
+    @mcp.tool()
+    async def resend_otp(booking_id: str) -> Dict[str, Any]:
+        """
+        Resend OTP code to user's email.
+        Use this tool when user requests to resend OTP (e.g., "gửi lại OTP", "resend OTP", "không nhận được OTP").
+        This will generate a new OTP code and send it to the email associated with the booking.
+        """
+        try:
+            validated = ResendOTPInput(booking_id=booking_id)
+            return await _resend_otp_impl(booking_id=validated.booking_id)
         except ValidationError as e:
             return {"success": False, "error": f"Input Validation Error: {str(e)}"}
 

@@ -11,6 +11,7 @@ from .booking_schema import (
     DeleteBookingInput,
     GetUserBookingsInput,
     VerifyOTPInput,
+    ResendOTPInput,
     CreatePaymentInput,
     ApplyPromotionCodeInput
 )
@@ -30,6 +31,7 @@ __all__ = [
     "DeleteBookingInput",
     "GetUserBookingsInput",
     "VerifyOTPInput",
+    "ResendOTPInput",
     "CreatePaymentInput",
     "ApplyPromotionCodeInput",
     # Tour Search

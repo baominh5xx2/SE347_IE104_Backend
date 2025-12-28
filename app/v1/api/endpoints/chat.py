@@ -98,16 +98,51 @@ async def chat_stream(
                 ):
                     event_type = event.get("event", "")
                     
+                    # Skip unwanted events (reasoning, on_llm_start, etc.) - only process what we need
+                    if event_type not in ["on_chat_model_stream", "on_chain_end"]:
+                        continue
+                    
                     # Stream LLM tokens
                     if event_type == "on_chat_model_stream":
                         chunk = event.get("data", {}).get("chunk", {})
                         if hasattr(chunk, "content") and chunk.content:
+                            # Handle complex content (string, list of strings, list of dicts)
+                            raw_content = chunk.content
+                            content = ""
+                            
+                            if isinstance(raw_content, str):
+                                content = raw_content
+                            elif isinstance(raw_content, list):
+                                for item in raw_content:
+                                    if isinstance(item, str):
+                                        content += item
+                                    elif isinstance(item, dict):
+                                        # Extract text from dict parts, skip reasoning
+                                        if item.get("type") == "text":
+                                            content += item.get("text", "")
+                                        elif "text" in item:
+                                            content += item.get("text", "")
+                                        elif "content" in item: # some providers use this
+                                            content += item.get("content", "")
+                            elif isinstance(raw_content, dict):
+                                if raw_content.get("type") == "text":
+                                    content = raw_content.get("text", "")
+                                elif "text" in raw_content:
+                                    content = raw_content.get("text", "")
+                                else:
+                                    # Fallback for unknown dict structure
+                                    content = raw_content.get("content", "")
+                            
+                            # Skip if content is empty (e.g., it was only a reasoning block)
+                            if not content:
+                                continue
+                            
                             token_event = {
                                 "type": "token",
-                                "content": chunk.content
+                                "content": content
                             }
                             yield f"data: {json.dumps(token_event, ensure_ascii=False)}\n\n"
-                            full_response += chunk.content
+                            full_response += content
                             has_streamed_tokens = True
                             
                             # If we have pending MCP UI and now have tokens, send it

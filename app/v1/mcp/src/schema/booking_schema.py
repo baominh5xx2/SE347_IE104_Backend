@@ -60,6 +60,11 @@ class VerifyOTPInput(BaseModel):
     otp_code: str = Field(..., pattern="^[0-9]{6}$", description="6-digit OTP code")
 
 
+class ResendOTPInput(BaseModel):
+    """Input schema for resend_otp tool"""
+    booking_id: str = Field(..., description="Booking ID that needs OTP to be resent")
+
+
 class CreatePaymentInput(BaseModel):
     """Input schema for create_payment tool"""
     booking_id: str = Field(..., description="UUID của booking cần thanh toán")
