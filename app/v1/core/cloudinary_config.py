@@ -7,6 +7,7 @@ import cloudinary.uploader
 import cloudinary.api
 from typing import Optional, List, Dict, Any
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -88,21 +89,33 @@ class CloudinaryConfig:
         folder: str = "tour_packages"
     ) -> List[str]:
         """
-        Upload multiple images to Cloudinary
+        Upload multiple images to Cloudinary in parallel using ThreadPoolExecutor
         
         Args:
             files: List of tuples containing (file_content, filename)
             folder: Cloudinary folder to store images
             
         Returns:
-            List of image URLs
+            List of image URLs (in the same order as input files)
         """
-        urls = []
-        
-        for file_content, filename in files:
+        def upload_single(file_data):
+            """Helper function to upload a single image"""
+            file_content, filename = file_data
             result = CloudinaryConfig.upload_image(file_content, filename, folder)
             if result and result.get("url"):
-                urls.append(result["url"])
+                return result["url"]
+            return None
+        
+        # Use ThreadPoolExecutor to upload images in parallel
+        # Max workers = min(10, number of files) for optimal performance
+        max_workers = min(10, len(files))
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all upload tasks and maintain order
+            results = list(executor.map(upload_single, files))
+        
+        # Filter out None values (failed uploads)
+        urls = [url for url in results if url is not None]
         
         return urls
     
@@ -130,7 +143,7 @@ class CloudinaryConfig:
     @staticmethod
     def delete_multiple_images(public_ids: List[str]) -> int:
         """
-        Delete multiple images from Cloudinary
+        Delete multiple images from Cloudinary in parallel using ThreadPoolExecutor
         
         Args:
             public_ids: List of Cloudinary public_ids
@@ -138,11 +151,18 @@ class CloudinaryConfig:
         Returns:
             Number of successfully deleted images
         """
-        deleted_count = 0
+        if not public_ids:
+            return 0
         
-        for public_id in public_ids:
-            if CloudinaryConfig.delete_image(public_id):
-                deleted_count += 1
+        # Use ThreadPoolExecutor to delete images in parallel
+        max_workers = min(10, len(public_ids))
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all delete tasks
+            results = list(executor.map(CloudinaryConfig.delete_image, public_ids))
+        
+        # Count successful deletions
+        deleted_count = sum(1 for success in results if success)
         
         return deleted_count
     
