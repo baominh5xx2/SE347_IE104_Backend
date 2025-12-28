@@ -138,3 +138,63 @@ def get_chat_room_service():
     from ..services.chat_room_service import ChatRoomService
     supabase = get_supabase_client()
     return ChatRoomService(supabase)
+
+
+def get_optional_current_user(
+    authorization: Optional[str] = Header(None),
+    auth_service: AuthService = Depends(get_auth_service)
+) -> Optional[Dict[str, Any]]:
+    """
+    Optional version of get_current_user - returns None if not authenticated
+    Useful for endpoints that work both with and without authentication
+    
+    Args:
+        authorization: Optional Authorization header value
+        auth_service: AuthService instance
+        
+    Returns:
+        Dict với user info nếu authenticated, None nếu không
+    """
+    if not authorization:
+        return None
+    
+    try:
+        # Parse "Bearer <token>" format
+        parts = authorization.split()
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            return None
+        
+        token = parts[1]
+        
+        # Verify token
+        verify_result = auth_service.verify_token(token)
+        
+        if verify_result["EC"] != 0:
+            return None
+        
+        token_data = verify_result["data"]
+        user_id = token_data.get("user_id")
+        
+        if not user_id:
+            return None
+        
+        # Query role and activation status từ database
+        user_status = auth_service.get_user_status(user_id)
+        
+        if user_status is None:
+            return None
+        
+        # Check if account is active
+        if not user_status.get("is_active", True):
+            return None
+        
+        # Return user info với role
+        return {
+            "user_id": user_id,
+            "email": token_data.get("email"),
+            "full_name": token_data.get("full_name"),
+            "role": user_status.get("role", "user")
+        }
+    except Exception as e:
+        logger.debug(f"Optional auth failed: {str(e)}")
+        return None

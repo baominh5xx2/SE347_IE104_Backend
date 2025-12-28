@@ -24,7 +24,9 @@ from ...schema.tour_package_schema import (
 )
 from ...services.tour_package_service import TourPackageService
 from ...core.supabase import get_supabase_client
-from ...core.dependencies import get_current_user
+from ...core.dependencies import get_current_user, get_optional_current_user
+from fastapi import Security
+from typing import Optional as Opt
 from ...core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,7 @@ async def recommend_tour_packages(
 @router.post("/search", response_model=TourPackageSearchResponse)
 async def search_tour_packages(
     request: TourPackageSearchRequest,
+    current_user: Opt[dict] = Depends(get_optional_current_user),  # Optional auth
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
@@ -109,12 +112,14 @@ async def search_tour_packages(
         }
     """
     try:
+        user_id = current_user.get("user_id") if current_user else None
         result = await service.search_packages(
             user_message=request.q,
             max_price=request.max_price,
             duration=request.duration,
             destination=request.destination,
-            limit=request.limit
+            limit=request.limit,
+            user_id=user_id
         )
         return TourPackageSearchResponse(**result)
         
@@ -129,6 +134,7 @@ async def get_tour_packages(
     destination: Optional[str] = Query(None, description="Lọc theo điểm đến"),
     limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
     offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    current_user: Opt[dict] = Depends(get_optional_current_user),  # Optional auth
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
@@ -149,11 +155,13 @@ async def get_tour_packages(
         GET /api/v1/tour-packages?destination=Đà Lạt
     """
     try:
+        user_id = current_user.get("user_id") if current_user else None
         result = await service.get_all_packages(
             is_active=is_active,
             destination=destination,
             limit=limit,
-            offset=offset
+            offset=offset,
+            user_id=user_id
         )
         return TourPackageListResponse(**result)
         
@@ -170,6 +178,7 @@ async def filter_tours_by_month(
     is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
     limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
     offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    current_user: Opt[dict] = Depends(get_optional_current_user),  # Optional auth
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
@@ -195,13 +204,15 @@ async def filter_tours_by_month(
         if date_type not in ['start_date', 'end_date']:
             raise HTTPException(status_code=400, detail="date_type phải là 'start_date' hoặc 'end_date'")
         
+        user_id = current_user.get("user_id") if current_user else None
         result = await service.filter_packages_by_month(
             month=month,
             year=year,
             date_type=date_type,
             is_active=is_active,
             limit=limit,
-            offset=offset
+            offset=offset,
+            user_id=user_id
         )
         return TourPackageListResponse(**result)
         
@@ -219,6 +230,7 @@ async def filter_tours_by_year(
     is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
     limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
     offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    current_user: Opt[dict] = Depends(get_optional_current_user),  # Optional auth
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
@@ -243,12 +255,14 @@ async def filter_tours_by_year(
         if date_type not in ['start_date', 'end_date']:
             raise HTTPException(status_code=400, detail="date_type phải là 'start_date' hoặc 'end_date'")
         
+        user_id = current_user.get("user_id") if current_user else None
         result = await service.filter_packages_by_year(
             year=year,
             date_type=date_type,
             is_active=is_active,
             limit=limit,
-            offset=offset
+            offset=offset,
+            user_id=user_id
         )
         return TourPackageListResponse(**result)
         
@@ -266,6 +280,7 @@ async def filter_tours_by_date(
     is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
     limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
     offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    current_user: Opt[dict] = Depends(get_optional_current_user),  # Optional auth
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
@@ -289,12 +304,14 @@ async def filter_tours_by_date(
         if start_date > end_date:
             raise HTTPException(status_code=400, detail="start_date phải nhỏ hơn hoặc bằng end_date")
         
+        user_id = current_user.get("user_id") if current_user else None
         result = await service.filter_packages_by_date(
             start_date=start_date,
             end_date=end_date,
             is_active=is_active,
             limit=limit,
-            offset=offset
+            offset=offset,
+            user_id=user_id
         )
         return TourPackageListResponse(**result)
         
@@ -313,6 +330,7 @@ async def filter_tours_by_price_range(
     is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
     limit: Optional[int] = Query(None, ge=1, le=100, description="Số lượng kết quả"),
     offset: Optional[int] = Query(None, ge=0, description="Bỏ qua số lượng"),
+    current_user: Opt[dict] = Depends(get_optional_current_user),  # Optional auth
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
@@ -373,12 +391,14 @@ async def filter_tours_by_price_range(
                 detail="min_price phải nhỏ hơn hoặc bằng max_price"
             )
         
+        user_id = current_user.get("user_id") if current_user else None
         result = await service.filter_packages_by_price_range(
             min_price=min_price,
             max_price=max_price,
             is_active=is_active,
             limit=limit,
-            offset=offset
+            offset=offset,
+            user_id=user_id
         )
         return TourPackageListResponse(**result)
         
@@ -392,6 +412,7 @@ async def filter_tours_by_price_range(
 @router.get("/{package_id}", response_model=TourPackageDetailResponse)
 async def get_tour_package(
     package_id: UUID,
+    current_user: Opt[dict] = Depends(get_optional_current_user),  # Optional auth
     service: TourPackageService = Depends(get_tour_package_service)
 ):
     """
@@ -408,7 +429,8 @@ async def get_tour_package(
         GET /api/v1/tour-packages/123e4567-e89b-12d3-a456-426614174000
     """
     try:
-        result = await service.get_package_by_id(str(package_id))
+        user_id = current_user.get("user_id") if current_user else None
+        result = await service.get_package_by_id(str(package_id), user_id=user_id)
         
         if result["EC"] == 1:
             raise HTTPException(status_code=404, detail=result["EM"])

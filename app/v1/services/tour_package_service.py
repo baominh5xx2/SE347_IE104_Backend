@@ -32,6 +32,7 @@ except ImportError:
 from .admin_settings_service import AdminSettingsService
 from .admin_featured_tours_service import AdminFeaturedToursService
 from .notification_service import NotificationService
+from .favorite_service import FavoriteTourService
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,63 @@ class TourPackageService:
         self.admin_settings = AdminSettingsService(supabase_client)
         self.admin_featured_tours = AdminFeaturedToursService(supabase_client)
         self.notification_service = NotificationService(supabase_client)
+        self.favorite_service = FavoriteTourService(supabase_client)
+    
+    async def _add_favorite_status(
+        self,
+        packages: List[Dict[str, Any]],
+        user_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Add is_favorite field to each package in the list
+        
+        Args:
+            packages: List of tour package dictionaries
+            user_id: Optional user ID to check favorite status
+            
+        Returns:
+            List of packages with is_favorite field added
+        """
+        if not packages:
+            return packages
+        
+        # If no user_id, set all to False
+        if not user_id:
+            for pkg in packages:
+                pkg['is_favorite'] = False
+            return packages
+        
+        # Batch check favorites for efficiency
+        package_ids = [str(pkg.get('package_id', '')) for pkg in packages if pkg.get('package_id')]
+        
+        if not package_ids:
+            # No valid package IDs, set all to False
+            for pkg in packages:
+                pkg['is_favorite'] = False
+            return packages
+        
+        # Get all favorites for this user
+        try:
+            favorites_result = self.supabase.table('favorite_tours') \
+                .select('package_id') \
+                .eq('user_id', user_id) \
+                .in_('package_id', package_ids) \
+                .execute()
+            
+            # Create set of favorited package IDs
+            favorited_ids = {str(fav['package_id']) for fav in favorites_result.data}
+            
+            # Add is_favorite to each package
+            for pkg in packages:
+                pkg_id = str(pkg.get('package_id', ''))
+                pkg['is_favorite'] = pkg_id in favorited_ids
+                
+        except Exception as e:
+            logger.warning(f"Error checking favorite status: {str(e)}, setting all to False")
+            for pkg in packages:
+                pkg['is_favorite'] = False
+        
+        return packages
     
     async def _generate_embedding(self, package_data: Dict[str, Any]) -> Optional[List[float]]:
         """
@@ -225,7 +283,8 @@ class TourPackageService:
         is_active: Optional[bool] = None,
         destination: Optional[str] = None,
         limit: Optional[int] = None,
-        offset: Optional[int] = None
+        offset: Optional[int] = None,
+        user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get all tour packages with optional filters
@@ -235,9 +294,10 @@ class TourPackageService:
             destination: Filter by destination
             limit: Number of records to return
             offset: Number of records to skip
+            user_id: Optional user ID to check favorite status
             
         Returns:
-            Dict with EC, EM, total, and packages list
+            Dict with EC, EM, total, and packages list (with is_favorite field)
         """
         try:
             query = self.supabase.table('tour_packages').select('*')
@@ -260,11 +320,14 @@ class TourPackageService:
             
             result = query.execute()
             
+            # Add is_favorite status to packages
+            packages_with_favorite = await self._add_favorite_status(result.data, user_id)
+            
             return {
                 "EC": 0,
                 "EM": "Successfully retrieved tour packages",
-                "total": len(result.data),
-                "packages": result.data
+                "total": len(packages_with_favorite),
+                "packages": packages_with_favorite
             }
             
         except Exception as e:
@@ -283,7 +346,8 @@ class TourPackageService:
         date_type: str = "start_date",
         is_active: Optional[bool] = None,
         limit: Optional[int] = None,
-        offset: Optional[int] = None
+        offset: Optional[int] = None,
+        user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Filter tour packages by month and year
@@ -333,11 +397,14 @@ class TourPackageService:
             
             result = query.execute()
             
+            # Add is_favorite status to packages
+            packages_with_favorite = await self._add_favorite_status(result.data, user_id)
+            
             return {
                 "EC": 0,
                 "EM": f"Successfully retrieved tour packages for {month}/{year}",
-                "total": len(result.data),
-                "packages": result.data
+                "total": len(packages_with_favorite),
+                "packages": packages_with_favorite
             }
             
         except Exception as e:
@@ -355,7 +422,8 @@ class TourPackageService:
         date_type: str = "start_date",
         is_active: Optional[bool] = None,
         limit: Optional[int] = None,
-        offset: Optional[int] = None
+        offset: Optional[int] = None,
+        user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Filter tour packages by year
@@ -400,11 +468,14 @@ class TourPackageService:
             
             result = query.execute()
             
+            # Add is_favorite status to packages
+            packages_with_favorite = await self._add_favorite_status(result.data, user_id)
+            
             return {
                 "EC": 0,
                 "EM": f"Successfully retrieved tour packages for year {year}",
-                "total": len(result.data),
-                "packages": result.data
+                "total": len(packages_with_favorite),
+                "packages": packages_with_favorite
             }
             
         except Exception as e:
@@ -422,7 +493,8 @@ class TourPackageService:
         end_date: date,
         is_active: Optional[bool] = None,
         limit: Optional[int] = None,
-        offset: Optional[int] = None
+        offset: Optional[int] = None,
+        user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Filter tour packages by a date range (inclusive).
@@ -456,11 +528,14 @@ class TourPackageService:
             
             result = query.execute()
             
+            # Add is_favorite status to packages
+            packages_with_favorite = await self._add_favorite_status(result.data, user_id)
+            
             return {
                 "EC": 0,
                 "EM": f"Successfully retrieved tour packages from {start_date.isoformat()} to {end_date.isoformat()}",
-                "total": len(result.data),
-                "packages": result.data
+                "total": len(packages_with_favorite),
+                "packages": packages_with_favorite
             }
             
         except Exception as e:
@@ -478,7 +553,8 @@ class TourPackageService:
         max_price: Optional[float] = None,
         is_active: Optional[bool] = None,
         limit: Optional[int] = None,
-        offset: Optional[int] = None
+        offset: Optional[int] = None,
+        user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Filter tour packages by price range
@@ -517,6 +593,9 @@ class TourPackageService:
             
             result = query.execute()
             
+            # Add is_favorite status to packages
+            packages_with_favorite = await self._add_favorite_status(result.data, user_id)
+            
             price_range_str = ""
             if min_price is not None and max_price is not None:
                 price_range_str = f"from {min_price:,.0f} to {max_price:,.0f} VND"
@@ -528,8 +607,8 @@ class TourPackageService:
             return {
                 "EC": 0,
                 "EM": f"Successfully retrieved tour packages {price_range_str}",
-                "total": len(result.data),
-                "packages": result.data
+                "total": len(packages_with_favorite),
+                "packages": packages_with_favorite
             }
             
         except Exception as e:
@@ -541,7 +620,7 @@ class TourPackageService:
                 "packages": []
             }
     
-    async def get_package_by_id(self, package_id: str) -> Dict[str, Any]:
+    async def get_package_by_id(self, package_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Get a single tour package by ID
         
@@ -564,10 +643,14 @@ class TourPackageService:
                     "package": None
                 }
             
+            package = result.data[0]
+            # Add is_favorite status
+            packages_with_favorite = await self._add_favorite_status([package], user_id)
+            
             return {
                 "EC": 0,
                 "EM": "Successfully retrieved tour package",
-                "package": result.data[0]
+                "package": packages_with_favorite[0] if packages_with_favorite else package
             }
             
         except Exception as e:
@@ -855,7 +938,8 @@ class TourPackageService:
         max_price: Optional[float] = None,
         duration: Optional[int] = None,
         destination: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
+        user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Search tour packages using hybrid search (semantic + keyword + filters)
@@ -901,11 +985,14 @@ class TourPackageService:
                 pkg_copy = {k: v for k, v in pkg.items() if k != 'description'}
                 filtered_packages.append(pkg_copy)
             
+            # Add is_favorite status to packages
+            packages_with_favorite = await self._add_favorite_status(filtered_packages, user_id)
+            
             return {
                 "EC": 0,
                 "EM": "Successfully searched tour packages",
-                "found": len(filtered_packages),
-                "packages": filtered_packages
+                "found": len(packages_with_favorite),
+                "packages": packages_with_favorite
             }
             
         except Exception as e:
@@ -982,13 +1069,16 @@ class TourPackageService:
                     # Remove description from response
                     filtered_packages = [{k: v for k, v in pkg.items() if k != 'description'} for pkg in selected_tours]
                     
-                    logger.info(f"✅ Returned {len(filtered_packages)} featured tours (Admin Mode)")
+                    # Add is_favorite status to packages
+                    packages_with_favorite = await self._add_favorite_status(filtered_packages, user_id)
+                    
+                    logger.info(f"✅ Returned {len(packages_with_favorite)} featured tours (Admin Mode)")
                     
                     return {
                         "EC": 0,
                         "EM": "Successfully recommended featured tours (Admin Mode)",
-                        "found": len(filtered_packages),
-                        "packages": filtered_packages,
+                        "found": len(packages_with_favorite),
+                        "packages": packages_with_favorite,
                         "mode": "admin"
                     }
                 else:
@@ -1007,13 +1097,16 @@ class TourPackageService:
                     # Remove description
                     filtered_packages = [{k: v for k, v in pkg.items() if k != 'description'} for pkg in combined_packages]
                     
-                    logger.info(f"✅ Hybrid: {len(featured_tours)} featured + {len(ai_result.get('packages', []))} AI = {len(filtered_packages)} total")
+                    # Add is_favorite status to packages
+                    packages_with_favorite = await self._add_favorite_status(filtered_packages, user_id)
+                    
+                    logger.info(f"✅ Hybrid: {len(featured_tours)} featured + {len(ai_result.get('packages', []))} AI = {len(packages_with_favorite)} total")
                     
                     return {
                         "EC": 0,
                         "EM": f"Hybrid recommendation: {len(featured_tours)} featured + {len(ai_result.get('packages', []))} AI",
-                        "found": len(filtered_packages),
-                        "packages": filtered_packages,
+                        "found": len(packages_with_favorite),
+                        "packages": packages_with_favorite,
                         "mode": "hybrid"
                     }
             else:
@@ -1185,13 +1278,16 @@ class TourPackageService:
                 pkg_copy = {k: v for k, v in pkg.items() if k != 'description'}
                 filtered_packages.append(pkg_copy)
             
-            logger.info(f"✅ Recommended {len(filtered_packages)} tours for user {user_id}")
+            # Add is_favorite status to packages
+            packages_with_favorite = await self._add_favorite_status(filtered_packages, user_id)
+            
+            logger.info(f"✅ Recommended {len(packages_with_favorite)} tours for user {user_id}")
             
             return {
                 "EC": 0,
                 "EM": "Successfully recommended tour packages",
-                "found": len(filtered_packages),
-                "packages": filtered_packages
+                "found": len(packages_with_favorite),
+                "packages": packages_with_favorite
             }
             
         except Exception as e:
