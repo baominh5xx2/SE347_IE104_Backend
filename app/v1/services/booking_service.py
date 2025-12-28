@@ -874,7 +874,8 @@ class BookingService:
             otp_data = {
                 "booking_id": booking_id,
                 "otp_code": otp_code,
-                "phone_number": contact_phone
+                "phone_number": contact_phone,
+                "created_at": datetime.now(timezone.utc).isoformat()
             }
             
             otp_insert_res = self.supabase.table("otp_verifications").insert(otp_data).execute()

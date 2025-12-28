@@ -7,7 +7,7 @@ import os
 import re
 import yaml
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from pydantic import BaseModel
 from app.v1.core.config import settings
 
@@ -64,6 +64,7 @@ class AgentConfig(BaseModel):
     modal_api_url: str = settings.MODAL_API_URL
     modal_api_key: str = settings.MODAL_API_KEY
     temperature: float = 0.7
+    reasoning: Optional[Dict[str, Any]] = None  # Reasoning config for OpenAI o1/o3 models
     
     # Agent Configuration
     max_iterations: int = 10
@@ -95,6 +96,7 @@ class AgentConfig(BaseModel):
             modal_api_url=llm_config.get('modal_api_url', settings.MODAL_API_URL) or settings.MODAL_API_URL,
             modal_api_key=llm_config.get('modal_api_key', settings.MODAL_API_KEY) or settings.MODAL_API_KEY,
             temperature=llm_config.get('temperature', 0.7),
+            reasoning=llm_config.get('reasoning'),  # Load reasoning config from YAML (only for o1/o3 models)
             # Keep other defaults from settings
             api_key=settings.OPENAI_API_KEY,
             organization="",

@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 import logging
 import os
+import time
+from typing import Dict, Tuple
 
 # Try to import checkpointer for conversation memory
 try:
@@ -80,6 +82,10 @@ class SupervisorGraph:
             "verbose": agent_config.enable_streaming
         }
         
+        # Add reasoning config if provided (only for OpenAI o1/o3 models)
+        if hasattr(agent_config, 'reasoning') and agent_config.reasoning:
+            llm_kwargs["reasoning"] = agent_config.reasoning
+        
         # Add organization if provided
         if agent_config.organization:
             llm_kwargs["organization"] = agent_config.organization
@@ -100,10 +106,18 @@ class SupervisorGraph:
         except Exception as e:
             self.chat_room_service = None
             logger.error(f"❌ Failed to init ChatRoomService: {str(e)}")
+        
+        # In-memory cache for conversation history (TTL: 5 minutes)
+        # Format: {conversation_id: (messages, timestamp)}
+        self._history_cache: Dict[str, Tuple[list, float]] = {}
+        self._cache_ttl = 300  # 5 minutes in seconds
 
-    async def _load_history_from_supabase(self, conversation_id: str, user_id: str, limit: int = 50) -> list[BaseMessage]:
+    async def _load_history_from_supabase(self, conversation_id: str, user_id: str, limit: int = 15) -> list[BaseMessage]:
         """
-        Load chat history from Supabase for a conversation/user.
+        Load chat history from Supabase for a conversation/user with caching.
+        
+        Uses in-memory cache with 5-minute TTL to reduce database queries.
+        Only loads last 15 messages (reduced from 50) to minimize prompt size.
 
         Only load when conversation_id is not default_conv to avoid accidental cross-user leakage.
         """
@@ -115,11 +129,24 @@ class SupervisorGraph:
         if not conversation_id or conversation_id == "default_conv":
             return history_messages
 
+        # Check cache first
+        cache_key = f"{conversation_id}:{user_id}"
+        current_time = time.time()
+        
+        if cache_key in self._history_cache:
+            cached_messages, cache_timestamp = self._history_cache[cache_key]
+            if current_time - cache_timestamp < self._cache_ttl:
+                logger.info(f"📦 Using cached history for {conversation_id} ({len(cached_messages)} messages)")
+                return cached_messages
+            else:
+                # Cache expired, remove it
+                del self._history_cache[cache_key]
+
         try:
             result = self.chat_room_service.get_room_messages(
                 room_id=conversation_id,
                 user_id=user_id,
-                limit=limit,
+                limit=limit,  # Reduced from 50 to 15
                 offset=0
             )
 
@@ -138,9 +165,11 @@ class SupervisorGraph:
                 elif role == "assistant":
                     history_messages.append(AIMessage(content=content))
 
+            # Cache the loaded messages
             if history_messages:
+                self._history_cache[cache_key] = (history_messages, current_time)
                 logger.info(
-                    f"📥 Loaded {len(history_messages)} messages from Supabase for room {conversation_id}"
+                    f"📥 Loaded {len(history_messages)} messages from Supabase for room {conversation_id} (cached)"
                 )
 
         except Exception as e:
@@ -244,7 +273,7 @@ class SupervisorGraph:
 
         # Fallback: load history from Supabase if buffer empty
         if not history_messages:
-            loaded = await self._load_history_from_supabase(conversation_id, user_id, limit=50)
+            loaded = await self._load_history_from_supabase(conversation_id, user_id, limit=15)
             if loaded:
                 history_messages = loaded
             
@@ -336,14 +365,14 @@ class SupervisorGraph:
 
         # Fallback: load history from Supabase if buffer empty
         if not history_messages:
-            loaded = await self._load_history_from_supabase(conversation_id, user_id, limit=50)
+            loaded = await self._load_history_from_supabase(conversation_id, user_id, limit=15)
             if loaded:
                 history_messages = loaded
             
             if history_messages:
                 initial_state["messages"] = history_messages + initial_state["messages"]
         
-        # Stream graph execution
+        # Stream graph execution with optimized streaming mode
         config = {
             "configurable": {
                 "thread_id": conversation_id,
@@ -354,8 +383,15 @@ class SupervisorGraph:
         logger.info(f"📝 Streaming conversation for thread_id: {conversation_id}")
         
         try:
+            # Use v2 streaming API with "values" mode for state updates
+            # This yields state updates immediately as they occur, improving TTFT
+            # Filter events to only yield what we need (skip reasoning, on_llm_start, etc.)
             async for event in self.graph.astream_events(initial_state, config, version="v2"):
-                yield event
+                event_type = event.get("event", "")
+                # Only yield events we actually need for frontend
+                # Skip: "reasoning", "on_llm_start", "on_chain_start", etc.
+                if event_type in ["on_chat_model_stream", "on_chain_end"]:
+                    yield event
                 
         except Exception as e:
             logger.error(f"❌ Error streaming message: {str(e)}")

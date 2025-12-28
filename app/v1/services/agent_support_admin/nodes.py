@@ -122,7 +122,19 @@ class AdminAgentNodes:
                 if tool_name in self.tools_by_name:
                     tool = self.tools_by_name[tool_name]
                     try:
-                        result = tool.invoke(tool_args)
+                        # Use ainvoke if available (better for async tools)
+                        if hasattr(tool, 'ainvoke'):
+                            result = await tool.ainvoke(tool_args)
+                        else:
+                            result = tool.invoke(tool_args)
+                            
+                        # Fix for "coroutine was never awaited" issue:
+                        # If result is a coroutine object, it means it wasn't awaited inside invoke/ainvoke
+                        import asyncio
+                        if asyncio.iscoroutine(result):
+                            logger.info(f"⏳ Awaiting coroutine result for admin tool: {tool_name}")
+                            result = await result
+                            
                         result_str = str(result) if not isinstance(result, str) else result
                     except Exception as e:
                         result_str = f"Error executing {tool_name}: {str(e)}"

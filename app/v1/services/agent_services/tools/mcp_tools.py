@@ -26,6 +26,7 @@ from app.v1.mcp.src.schema import (
     UpdateBookingInput,
     DeleteBookingInput,
     VerifyOTPInput,
+    ResendOTPInput,
     CreatePaymentInput,
     ApplyPromotionCodeInput
 )
@@ -146,7 +147,7 @@ class BookingToolHandler:
     def __init__(self, mcp_client: MCPClient):
         self.mcp_client = mcp_client
     
-    def create_booking(
+    async def create_booking(
         self, 
         user_phone: str,
         user_email: str,
@@ -168,8 +169,8 @@ class BookingToolHandler:
             if user_id:
                 params["user_id"] = user_id
             
-            result = self.mcp_client.call_tool_sync("create_booking", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("create_booking", params)
+        except asyncio.TimeoutError:
             logger.error("create_booking timeout")
             return {"error": "Request timeout"}
         except Exception as e:
@@ -189,12 +190,12 @@ class BookingToolHandler:
         
         return {"error": f"Failed to create booking: Unexpected response type: {type(result)}"}
     
-    def get_user_bookings(self, user_id: str) -> Dict[str, Any]:
+    async def get_user_bookings(self, user_id: str) -> Dict[str, Any]:
         """Get all bookings for a user"""
         try:
             params = {"user_id": user_id}
-            result = self.mcp_client.call_tool_sync("get_user_bookings", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("get_user_bookings", params)
+        except asyncio.TimeoutError:
             logger.error("get_user_bookings timeout")
             return {"success": False, "error": "Request timeout"}
         except Exception as e:
@@ -206,7 +207,7 @@ class BookingToolHandler:
         
         return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
     
-    def update_booking(
+    async def update_booking(
         self, 
         booking_id: str, 
         number_of_people: Optional[int] = None, 
@@ -220,8 +221,8 @@ class BookingToolHandler:
             if special_requests is not None:
                 params["special_requests"] = special_requests
             
-            result = self.mcp_client.call_tool_sync("update_booking", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("update_booking", params)
+        except asyncio.TimeoutError:
             logger.error("update_booking timeout")
             return {"success": False, "error": "Request timeout"}
         except Exception as e:
@@ -233,15 +234,15 @@ class BookingToolHandler:
         
         return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
     
-    def delete_booking(self, booking_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
+    async def delete_booking(self, booking_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
         """Delete (cancel) a booking"""
         try:
             params = {"booking_id": booking_id}
             if reason:
                 params["reason"] = reason
             
-            result = self.mcp_client.call_tool_sync("delete_booking", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("delete_booking", params)
+        except asyncio.TimeoutError:
             logger.error("delete_booking timeout")
             return {"success": False, "error": "Request timeout"}
         except Exception as e:
@@ -253,7 +254,7 @@ class BookingToolHandler:
         
         return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
     
-    def verify_otp_and_confirm_booking(self, booking_id: str, otp_code: str) -> Dict[str, Any]:
+    async def verify_otp_and_confirm_booking(self, booking_id: str, otp_code: str) -> Dict[str, Any]:
         """Verify OTP code and confirm booking"""
         try:
             params = {
@@ -261,8 +262,8 @@ class BookingToolHandler:
                 "otp_code": otp_code
             }
             
-            result = self.mcp_client.call_tool_sync("verify_otp_and_confirm_booking", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("verify_otp_and_confirm_booking", params)
+        except asyncio.TimeoutError:
             logger.error("verify_otp_and_confirm_booking timeout")
             return {"success": False, "error": "Request timeout"}
         except Exception as e:
@@ -274,16 +275,23 @@ class BookingToolHandler:
         
         return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
     
-    def create_payment(self, booking_id: str, payment_method: str = "vnpay") -> Dict[str, Any]:
+    async def create_payment(
+        self, 
+        booking_id: str, 
+        payment_method: str = "vnpay",
+        return_url: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Create payment và generate VNPay URL"""
         try:
             params = {
                 "booking_id": booking_id,
                 "payment_method": payment_method
             }
+            if return_url:
+                params["return_url"] = return_url
             
-            result = self.mcp_client.call_tool_sync("create_payment", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("create_payment", params)
+        except asyncio.TimeoutError:
             logger.error("create_payment timeout")
             return {"success": False, "error": "Request timeout"}
         except Exception as e:
@@ -295,7 +303,7 @@ class BookingToolHandler:
         
         return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response type"}
     
-    def apply_promotion_code(
+    async def apply_promotion_code(
         self,
         booking_id: str,
         promotion_code: str
@@ -307,8 +315,8 @@ class BookingToolHandler:
                 "promotion_code": promotion_code
             }
             
-            result = self.mcp_client.call_tool_sync("apply_promotion_code", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("apply_promotion_code", params)
+        except asyncio.TimeoutError:
             logger.error("apply_promotion_code timeout")
             return {"success": False, "error": "Request timeout"}
         except Exception as e:
@@ -327,7 +335,7 @@ class SearchToolHandler:
     def __init__(self, mcp_client: MCPClient):
         self.mcp_client = mcp_client
     
-    def search_tour_packages(
+    async def search_tour_packages(
         self,
         user_message: str,
         max_price: Optional[float] = None,
@@ -345,8 +353,8 @@ class SearchToolHandler:
             if destination:
                 params["destination"] = destination
             
-            result = self.mcp_client.call_tool_sync("search_tour_packages", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("search_tour_packages", params)
+        except asyncio.TimeoutError:
             logger.error("search_tour_packages timeout")
             return {"found": 0, "packages": [], "error": "Request timeout"}
         except Exception as e:
@@ -355,7 +363,7 @@ class SearchToolHandler:
         
         return result if result else {"found": 0, "packages": []}
     
-    def search_mem0_episodes(
+    async def search_mem0_episodes(
         self, 
         search_query: str, 
         user_id: Optional[str] = None, 
@@ -367,8 +375,8 @@ class SearchToolHandler:
             if user_id:
                 params["user_id"] = user_id
             
-            result = self.mcp_client.call_tool_sync("search_episodes", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("search_episodes", params)
+        except asyncio.TimeoutError:
             logger.error("search_mem0_episodes timeout")
             return {"found": 0, "episodes": [], "error": "Request timeout"}
         except Exception as e:
@@ -384,7 +392,7 @@ class FlightToolHandler:
     def __init__(self, mcp_client: MCPClient):
         self.mcp_client = mcp_client
     
-    def search_flights(self, departure_iata: str, arrival_iata: str, limit: int = 5) -> str:
+    async def search_flights(self, departure_iata: str, arrival_iata: str, limit: int = 5) -> str:
         """Search for flights between two airports"""
         try:
             params = {
@@ -392,8 +400,8 @@ class FlightToolHandler:
                 "arrival_iata": arrival_iata,
                 "limit": limit
             }
-            result = self.mcp_client.call_tool_sync("search_flights", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("search_flights", params)
+        except asyncio.TimeoutError:
             logger.error("search_flights timeout")
             return "Error: Request timeout"
         except Exception as e:
@@ -409,12 +417,12 @@ class WeatherToolHandler:
     def __init__(self, mcp_client: MCPClient):
         self.mcp_client = mcp_client
     
-    def get_current_temperature(self, city_name: str) -> str:
+    async def get_current_temperature(self, city_name: str) -> str:
         """Get current temperature and weather conditions"""
         try:
             params = {"city_name": city_name}
-            result = self.mcp_client.call_tool_sync("get_current_temperature_by_city", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("get_current_temperature_by_city", params)
+        except asyncio.TimeoutError:
             logger.error("get_current_temperature timeout")
             return "Error: Request timeout"
         except Exception as e:
@@ -423,12 +431,12 @@ class WeatherToolHandler:
         
         return result if result else "Error: No response from MCP server"
     
-    def get_weather_forecast(self, city_name: str, days: int = 5) -> str:
+    async def get_weather_forecast(self, city_name: str, days: int = 5) -> str:
         """Get weather forecast for a city"""
         try:
             params = {"city_name": city_name, "days": days}
-            result = self.mcp_client.call_tool_sync("get_weather_forecast_by_city", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("get_weather_forecast_by_city", params)
+        except asyncio.TimeoutError:
             logger.error("get_weather_forecast timeout")
             return "Error: Request timeout"
         except Exception as e:
@@ -444,12 +452,12 @@ class UIToolHandler:
     def __init__(self, mcp_client: MCPClient):
         self.mcp_client = mcp_client
     
-    def generate_tour_ui(self, packages: list) -> Dict[str, Any]:
+    async def generate_tour_ui(self, packages: list) -> Dict[str, Any]:
         """Generate interactive UI for tour packages"""
         try:
             params = {"packages": packages}
-            result = self.mcp_client.call_tool_sync("generate_tour_ui", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("generate_tour_ui", params)
+        except asyncio.TimeoutError:
             logger.error("generate_tour_ui timeout")
             return {"error": "Request timeout"}
         except Exception as e:
@@ -458,7 +466,7 @@ class UIToolHandler:
         
         return result if result else {"error": "No response from MCP server"}
     
-    def generate_payment_ui(
+    async def generate_payment_ui(
         self,
         payment_url: str,
         booking_id: str,
@@ -475,8 +483,8 @@ class UIToolHandler:
                 "tour_name": tour_name,
                 "payment_method": payment_method
             }
-            result = self.mcp_client.call_tool_sync("generate_payment_ui", params)
-        except concurrent.futures.TimeoutError:
+            result = await self.mcp_client.call_tool("generate_payment_ui", params)
+        except asyncio.TimeoutError:
             logger.error("generate_payment_ui timeout")
             return {"success": False, "error": "Request timeout"}
         except Exception as e:
@@ -594,7 +602,8 @@ class MCPToolFactory:
     def create_booking_tool(self) -> StructuredTool:
         """Create StructuredTool for create_booking"""
         return StructuredTool.from_function(
-            func=self.booking_handler.create_booking,
+            func=create_booking_sync,
+            coroutine=self.booking_handler.create_booking,
             name="create_booking",
             description="Tạo booking mới cho user - YÊU CẦU THU THẬP ĐẦY ĐỦ THÔNG TIN TRƯỚC KHI GỌI (user_phone, user_email, package_id, number_of_people). Hệ thống sẽ gửi mã OTP về email để xác nhận.",
             args_schema=CreateBookingInput
@@ -603,7 +612,8 @@ class MCPToolFactory:
     def get_user_bookings_tool(self) -> StructuredTool:
         """Create StructuredTool for get_user_bookings"""
         return StructuredTool.from_function(
-            func=self.booking_handler.get_user_bookings,
+            func=get_user_bookings_sync,
+            coroutine=self.booking_handler.get_user_bookings,
             name="get_user_bookings",
             description="Lấy danh sách tất cả các booking của user. Trả về chi tiết tour, ngày khởi hành, số người, tổng tiền và trạng thái booking.",
             args_schema=GetUserBookingsInput
@@ -612,7 +622,8 @@ class MCPToolFactory:
     def update_booking_tool(self) -> StructuredTool:
         """Create StructuredTool for update_booking"""
         return StructuredTool.from_function(
-            func=self.booking_handler.update_booking,
+            func=update_booking_sync,
+            coroutine=self.booking_handler.update_booking,
             name="update_booking",
             description="Cập nhật booking hiện tại - có thể thay đổi số người hoặc ghi chú đặc biệt. Nếu tăng số người, hệ thống tự động kiểm tra còn slot và cập nhật giá.",
             args_schema=UpdateBookingInput
@@ -621,7 +632,8 @@ class MCPToolFactory:
     def delete_booking_tool(self) -> StructuredTool:
         """Create StructuredTool for delete_booking"""
         return StructuredTool.from_function(
-            func=self.booking_handler.delete_booking,
+            func=delete_booking_sync,
+            coroutine=self.booking_handler.delete_booking,
             name="delete_booking",
             description="Hủy (cancel) booking và trả lại slot cho tour. Dữ liệu booking được giữ lại với trạng thái 'cancelled' (soft delete).",
             args_schema=DeleteBookingInput
@@ -629,17 +641,41 @@ class MCPToolFactory:
     
     def verify_otp_and_confirm_booking_tool(self) -> StructuredTool:
         """Create StructuredTool for verify_otp_and_confirm_booking"""
+        # Define internal sync wrapper
+        def verify_otp_sync(*args, **kwargs):
+            return _run_async_safe(self.booking_handler.verify_otp_and_confirm_booking(*args, **kwargs))
+            
         return StructuredTool.from_function(
-            func=self.booking_handler.verify_otp_and_confirm_booking,
+            func=verify_otp_sync,
+            coroutine=self.booking_handler.verify_otp_and_confirm_booking,
             name="verify_otp_and_confirm_booking",
             description="Xác thực mã OTP và xác nhận booking. Gọi tool này khi user cung cấp mã OTP 6 số từ email. Sau khi verify thành công, booking sẽ được chuyển sang trạng thái 'confirmed'.",
             args_schema=VerifyOTPInput
         )
     
+    def resend_otp_tool(self) -> StructuredTool:
+        """Create StructuredTool for resend_otp"""
+        # Define internal sync wrapper
+        def resend_otp_sync(*args, **kwargs):
+            return _run_async_safe(self.booking_handler.resend_otp(*args, **kwargs))
+            
+        return StructuredTool.from_function(
+            func=resend_otp_sync,
+            coroutine=self.booking_handler.resend_otp,
+            name="resend_otp",
+            description="Resend OTP code to user's email. Use when user says 'gửi lại OTP', 'resend OTP', 'không nhận được OTP'.",
+            args_schema=ResendOTPInput
+        )
+    
     def create_payment_tool(self) -> StructuredTool:
         """Create StructuredTool for create_payment"""
+        # Define internal sync wrapper
+        def create_payment_sync(*args, **kwargs):
+            return _run_async_safe(self.booking_handler.create_payment(*args, **kwargs))
+            
         return StructuredTool.from_function(
-            func=self.booking_handler.create_payment,
+            func=create_payment_sync,
+            coroutine=self.booking_handler.create_payment,
             name="create_payment",
             description="Tạo payment request và generate VNPay URL cho booking đã được xác nhận. Gọi tool này sau khi verify OTP thành công để tạo link thanh toán. Tool sẽ trả về payment_url để user có thể thanh toán.",
             args_schema=CreatePaymentInput
@@ -648,7 +684,8 @@ class MCPToolFactory:
     def apply_promotion_code_tool(self) -> StructuredTool:
         """Create StructuredTool for apply_promotion_code"""
         return StructuredTool.from_function(
-            func=self.booking_handler.apply_promotion_code,
+            func=apply_promotion_code_sync,
+            coroutine=self.booking_handler.apply_promotion_code,
             name="apply_promotion_code",
             description=(
                 "Áp dụng mã khuyến mãi (promotion code) vào booking đã tạo. "
@@ -664,7 +701,8 @@ class MCPToolFactory:
     def search_tour_packages_tool(self) -> StructuredTool:
         """Create StructuredTool for search_tour_packages"""
         return StructuredTool.from_function(
-            func=self.search_handler.search_tour_packages,
+            func=search_tour_packages_sync,
+            coroutine=self.search_handler.search_tour_packages,
             name="search_tour_packages",
             description="Search tour packages using semantic vector search. This tool uses AI embeddings to find tours that semantically match the user's query.",
             args_schema=SearchTourPackagesInput
@@ -673,7 +711,8 @@ class MCPToolFactory:
     def search_mem0_episodes_tool(self) -> StructuredTool:
         """Create StructuredTool for search_mem0_episodes"""
         return StructuredTool.from_function(
-            func=self.search_handler.search_mem0_episodes,
+            func=search_mem0_episodes_sync,
+            coroutine=self.search_handler.search_mem0_episodes,
             name="search_episodes",
             description="Search through conversation history and user interactions stored in Mem0 memory system to find relevant episodes. Use this to find past conversations or user preferences related to the query.",
             args_schema=SearchEpisodesInput
@@ -683,7 +722,8 @@ class MCPToolFactory:
     def search_flights_tool(self) -> StructuredTool:
         """Create StructuredTool for search_flights"""
         return StructuredTool.from_function(
-            func=self.flight_handler.search_flights,
+            func=search_flights_sync,
+            coroutine=self.flight_handler.search_flights,
             name="search_flights",
             description="Search for flights between two airports. Returns future flights only (not yet departed). Use IATA codes (e.g., HAN=Hanoi, SGN=Ho Chi Minh, DAD=Da Nang).",
             args_schema=SearchFlightsInput
@@ -693,7 +733,8 @@ class MCPToolFactory:
     def get_current_temperature_tool(self) -> StructuredTool:
         """Create StructuredTool for get_current_temperature"""
         return StructuredTool.from_function(
-            func=self.weather_handler.get_current_temperature,
+            func=get_current_temperature_sync,
+            coroutine=self.weather_handler.get_current_temperature,
             name="get_current_temperature",
             description="Get current temperature and weather conditions for a city. Use this when user asks about current weather.",
             args_schema=GetCurrentTemperatureInput
@@ -702,7 +743,8 @@ class MCPToolFactory:
     def get_weather_forecast_tool(self) -> StructuredTool:
         """Create StructuredTool for get_weather_forecast"""
         return StructuredTool.from_function(
-            func=self.weather_handler.get_weather_forecast,
+            func=get_weather_forecast_sync,
+            coroutine=self.weather_handler.get_weather_forecast,
             name="get_weather_forecast",
             description="Get weather forecast for a city for the next few days (1-5 days). Use this when user asks about weather forecast or future weather.",
             args_schema=GetWeatherForecastInput
@@ -715,7 +757,8 @@ class MCPToolFactory:
             packages: list = Field(..., description="List of tour package dictionaries to display in UI grid")
         
         return StructuredTool.from_function(
-            func=self.ui_handler.generate_tour_ui,
+            func=generate_tour_ui_sync,
+            coroutine=self.ui_handler.generate_tour_ui,
             name="generate_tour_ui",
             description="Generate beautiful interactive UI component displaying tour packages in a responsive grid. Use this after getting tour recommendations to show them visually with images, prices, and booking buttons.",
             args_schema=GenerateTourUIInput
@@ -730,8 +773,13 @@ class MCPToolFactory:
             tour_name: str = Field(..., description="Tour package name")
             payment_method: str = Field(default="vnpay", description="Payment method")
         
+        # Define internal sync wrapper
+        def generate_payment_ui_sync(*args, **kwargs):
+            return _run_async_safe(self.ui_handler.generate_payment_ui(*args, **kwargs))
+            
         return StructuredTool.from_function(
-            func=self.ui_handler.generate_payment_ui,
+            func=generate_payment_ui_sync,
+            coroutine=self.ui_handler.generate_payment_ui,
             name="generate_payment_ui",
             description="Generate payment button UI component for user to click and pay. Call this tool after create_payment succeeds to show payment button to user. The button will redirect user to VNPay payment page.",
             args_schema=GeneratePaymentUIInput
@@ -754,7 +802,7 @@ class MCPToolFactory:
             destination: str = Field(..., description="Tên địa điểm cần tìm thông tin tour (ví dụ: 'Đà Lạt', 'Phú Quốc', 'Hà Nội')")
         
         return StructuredTool.from_function(
-            func=self.perplexity_handler.search_latest_tour_info_sync,
+            func=self.perplexity_handler.search_latest_tour_info,
             name="search_latest_tour_info",
             description=(
                 "Tìm thông tin tour mới nhất và cập nhật cho một địa điểm cụ thể bằng Perplexity API. "
@@ -774,35 +822,51 @@ class MCPToolFactory:
 _tool_factory = MCPToolFactory()
 
 # Backward compatibility: Export functions that match old API
+# These wrap async functions for sync contexts (use ThreadPoolExecutor if event loop exists)
+def _run_async_safe(coro):
+    """Run async coroutine safely, handling existing event loops"""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Event loop is running, use ThreadPoolExecutor
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(lambda: asyncio.run(coro))
+                return future.result(timeout=30)
+        else:
+            return loop.run_until_complete(coro)
+    except RuntimeError:
+        # No event loop, create one
+        return asyncio.run(coro)
+
 def create_booking_sync(*args, **kwargs):
-    return _tool_factory.booking_handler.create_booking(*args, **kwargs)
+    return _run_async_safe(_tool_factory.booking_handler.create_booking(*args, **kwargs))
 
 def get_user_bookings_sync(*args, **kwargs):
-    return _tool_factory.booking_handler.get_user_bookings(*args, **kwargs)
+    return _run_async_safe(_tool_factory.booking_handler.get_user_bookings(*args, **kwargs))
 
 def update_booking_sync(*args, **kwargs):
-    return _tool_factory.booking_handler.update_booking(*args, **kwargs)
+    return _run_async_safe(_tool_factory.booking_handler.update_booking(*args, **kwargs))
 
 def delete_booking_sync(*args, **kwargs):
-    return _tool_factory.booking_handler.delete_booking(*args, **kwargs)
+    return _run_async_safe(_tool_factory.booking_handler.delete_booking(*args, **kwargs))
 
 def search_tour_packages_sync(*args, **kwargs):
-    return _tool_factory.search_handler.search_tour_packages(*args, **kwargs)
+    return _run_async_safe(_tool_factory.search_handler.search_tour_packages(*args, **kwargs))
 
 def search_mem0_episodes_sync(*args, **kwargs):
-    return _tool_factory.search_handler.search_mem0_episodes(*args, **kwargs)
+    return _run_async_safe(_tool_factory.search_handler.search_mem0_episodes(*args, **kwargs))
 
 def search_flights_sync(*args, **kwargs):
-    return _tool_factory.flight_handler.search_flights(*args, **kwargs)
+    return _run_async_safe(_tool_factory.flight_handler.search_flights(*args, **kwargs))
 
 def get_current_temperature_sync(*args, **kwargs):
-    return _tool_factory.weather_handler.get_current_temperature(*args, **kwargs)
+    return _run_async_safe(_tool_factory.weather_handler.get_current_temperature(*args, **kwargs))
 
 def get_weather_forecast_sync(*args, **kwargs):
-    return _tool_factory.weather_handler.get_weather_forecast(*args, **kwargs)
+    return _run_async_safe(_tool_factory.weather_handler.get_weather_forecast(*args, **kwargs))
 
 def generate_tour_ui_sync(*args, **kwargs):
-    return _tool_factory.ui_handler.generate_tour_ui(*args, **kwargs)
+    return _run_async_safe(_tool_factory.ui_handler.generate_tour_ui(*args, **kwargs))
 
 def request_recommendation_sync(*args, **kwargs):
     return _tool_factory.recommendation_handler.request_recommendation(*args, **kwargs)
@@ -827,7 +891,7 @@ def create_payment_tool() -> StructuredTool:
     return _tool_factory.create_payment_tool()
 
 def apply_promotion_code_sync(*args, **kwargs):
-    return _tool_factory.booking_handler.apply_promotion_code(*args, **kwargs)
+    return _run_async_safe(_tool_factory.booking_handler.apply_promotion_code(*args, **kwargs))
 
 def apply_promotion_code_tool() -> StructuredTool:
     return _tool_factory.apply_promotion_code_tool()
@@ -864,3 +928,8 @@ async def call_mcp_tool(tool_name: str, params: Dict[str, Any]) -> Any:
     """Legacy function for backward compatibility"""
     client = MCPClient()
     return await client.call_tool(tool_name, params)
+
+# Export tool factory for direct async handler access
+def get_tool_factory() -> MCPToolFactory:
+    """Get the tool factory instance for direct async handler access"""
+    return _tool_factory

@@ -118,24 +118,29 @@ class RecommendationEngine:
                         logger.info(f"✅ Enhanced query with {len(memory_contexts)} memory contexts")
             
             # Perform semantic search via MCP tool (for automatic logging via callback handler)
-            # Use tool instead of direct mcp_client call so callback handler can log it
-            from app.v1.services.agent_services.tools.mcp_tools import search_tour_packages_tool
+            # Call async handler directly to avoid StructuredTool async handling issues
+            from app.v1.services.agent_services.tools.mcp_tools import get_tool_factory
             
-            search_tool = search_tour_packages_tool()
+            tool_factory = get_tool_factory()
             
-            # Call tool with callback handler for automatic logging
-            search_result = await search_tool.ainvoke(
-                {
-                    "user_message": enhanced_query,
-                    "max_price": filters.get("max_price") if filters else None,
-                    "duration": filters.get("duration") if filters else None,
-                    "destination": filters.get("destination") if filters else None,
-                    "limit": limit
-                },
-                config={"callbacks": [agent_callback]} if agent_callback else {}
+            # Call async handler directly
+            search_result = await tool_factory.search_handler.search_tour_packages(
+                user_message=enhanced_query,
+                max_price=filters.get("max_price") if filters else None,
+                duration=filters.get("duration") if filters else None,
+                destination=filters.get("destination") if filters else None,
+                limit=limit
             )
             
-            results = search_result.get("packages", [])
+            # Log tool execution manually for callback handler
+            if agent_callback:
+                try:
+                    agent_callback.on_tool_start({"name": "search_tour_packages", "input": enhanced_query})
+                    agent_callback.on_tool_end({"output": str(search_result)})
+                except Exception:
+                    pass  # Ignore callback errors
+            
+            results = search_result.get("packages", []) if isinstance(search_result, dict) else []
             
             # Generate reasoning
             reasoning = self._generate_reasoning(
