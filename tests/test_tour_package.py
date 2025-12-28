@@ -1293,6 +1293,417 @@ def test_bulk_create_response_schema_with_errors():
     logger.info("✓ Test bulk create response with errors passed")
 
 
+# ==================== Test is_favorite Feature ====================
+
+@pytest.mark.asyncio
+async def test_add_favorite_status_with_user_id(tour_service, sample_tour_response):
+    """Test _add_favorite_status adds is_favorite field when user_id is provided"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    package_id = sample_tour_response["package_id"]
+    
+    # Mock favorites query - package is favorited
+    mock_favorites_execute = Mock()
+    mock_favorites_execute.data = [{"package_id": package_id}]
+    mock_table.select.return_value.eq.return_value.in_.return_value.execute.return_value = mock_favorites_execute
+    
+    packages = [sample_tour_response.copy()]
+    
+    # Execute
+    result = await service._add_favorite_status(packages, user_id)
+    
+    # Assertions
+    assert len(result) == 1
+    assert result[0]["is_favorite"] is True
+    assert "is_favorite" in result[0]
+    
+    logger.info("✓ Test add favorite status with user_id passed")
+
+
+@pytest.mark.asyncio
+async def test_add_favorite_status_without_user_id(tour_service, sample_tour_response):
+    """Test _add_favorite_status sets is_favorite=False when user_id is None"""
+    service, mock_table = tour_service
+    
+    packages = [sample_tour_response.copy()]
+    
+    # Execute without user_id
+    result = await service._add_favorite_status(packages, None)
+    
+    # Assertions
+    assert len(result) == 1
+    assert result[0]["is_favorite"] is False
+    assert "is_favorite" in result[0]
+    
+    logger.info("✓ Test add favorite status without user_id passed")
+
+
+@pytest.mark.asyncio
+async def test_add_favorite_status_not_favorited(tour_service, sample_tour_response):
+    """Test _add_favorite_status when package is not favorited"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    package_id = sample_tour_response["package_id"]
+    
+    # Mock favorites query - empty (not favorited)
+    mock_favorites_execute = Mock()
+    mock_favorites_execute.data = []
+    mock_table.select.return_value.eq.return_value.in_.return_value.execute.return_value = mock_favorites_execute
+    
+    packages = [sample_tour_response.copy()]
+    
+    # Execute
+    result = await service._add_favorite_status(packages, user_id)
+    
+    # Assertions
+    assert len(result) == 1
+    assert result[0]["is_favorite"] is False
+    
+    logger.info("✓ Test add favorite status not favorited passed")
+
+
+@pytest.mark.asyncio
+async def test_add_favorite_status_multiple_packages(tour_service):
+    """Test _add_favorite_status with multiple packages (batch check)"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    package_id_1 = str(uuid4())
+    package_id_2 = str(uuid4())
+    package_id_3 = str(uuid4())
+    
+    packages = [
+        {"package_id": package_id_1, "package_name": "Tour 1"},
+        {"package_id": package_id_2, "package_name": "Tour 2"},
+        {"package_id": package_id_3, "package_name": "Tour 3"}
+    ]
+    
+    # Mock favorites query - only package 1 and 3 are favorited
+    mock_favorites_execute = Mock()
+    mock_favorites_execute.data = [
+        {"package_id": package_id_1},
+        {"package_id": package_id_3}
+    ]
+    mock_table.select.return_value.eq.return_value.in_.return_value.execute.return_value = mock_favorites_execute
+    
+    # Execute
+    result = await service._add_favorite_status(packages, user_id)
+    
+    # Assertions
+    assert len(result) == 3
+    assert result[0]["is_favorite"] is True  # package 1
+    assert result[1]["is_favorite"] is False  # package 2
+    assert result[2]["is_favorite"] is True  # package 3
+    
+    logger.info("✓ Test add favorite status multiple packages passed")
+
+
+@pytest.mark.asyncio
+async def test_add_favorite_status_empty_list(tour_service):
+    """Test _add_favorite_status with empty packages list"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    
+    # Execute with empty list
+    result = await service._add_favorite_status([], user_id)
+    
+    # Assertions
+    assert len(result) == 0
+    
+    logger.info("✓ Test add favorite status empty list passed")
+
+
+@pytest.mark.asyncio
+async def test_add_favorite_status_database_error(tour_service, sample_tour_response):
+    """Test _add_favorite_status handles database errors gracefully"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    packages = [sample_tour_response.copy()]
+    
+    # Mock database error
+    mock_table.select.side_effect = Exception("Database connection error")
+    
+    # Execute
+    result = await service._add_favorite_status(packages, user_id)
+    
+    # Assertions - should set all to False on error
+    assert len(result) == 1
+    assert result[0]["is_favorite"] is False
+    
+    logger.info("✓ Test add favorite status database error passed")
+
+
+@pytest.mark.asyncio
+async def test_get_all_packages_with_favorite_status(tour_service, sample_tour_response):
+    """Test get_all_packages includes is_favorite field"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    package_id = sample_tour_response["package_id"]
+    
+    # Mock get packages response
+    mock_execute = Mock()
+    mock_execute.data = [sample_tour_response]
+    mock_table.select.return_value.order.return_value.execute.return_value = mock_execute
+    
+    # Mock favorites query
+    mock_favorites_execute = Mock()
+    mock_favorites_execute.data = [{"package_id": package_id}]
+    # Need to reset side_effect for second call
+    def mock_table_side_effect(table_name):
+        mock_tbl = Mock()
+        if table_name == 'favorite_tours':
+            mock_tbl.select.return_value.eq.return_value.in_.return_value.execute.return_value = mock_favorites_execute
+        else:
+            mock_tbl.select.return_value.order.return_value.execute.return_value = mock_execute
+        return mock_tbl
+    
+    mock_table.__class__.table = Mock(side_effect=lambda self, name: mock_table_side_effect(name))
+    
+    # Patch _add_favorite_status to avoid complex mocking
+    with patch.object(service, '_add_favorite_status', return_value=[{**sample_tour_response, "is_favorite": True}]):
+        # Execute
+        result = await service.get_all_packages(user_id=user_id)
+        
+        # Assertions
+        assert result["EC"] == 0
+        assert len(result["packages"]) == 1
+        assert result["packages"][0]["is_favorite"] is True
+    
+    logger.info("✓ Test get all packages with favorite status passed")
+
+
+@pytest.mark.asyncio
+async def test_get_package_by_id_with_favorite_status(tour_service, sample_tour_response):
+    """Test get_package_by_id includes is_favorite field"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    package_id = sample_tour_response["package_id"]
+    
+    # Mock get package response
+    mock_execute = Mock()
+    mock_execute.data = [sample_tour_response]
+    mock_table.select.return_value.eq.return_value.execute.return_value = mock_execute
+    
+    # Patch _add_favorite_status
+    with patch.object(service, '_add_favorite_status', return_value=[{**sample_tour_response, "is_favorite": False}]):
+        # Execute
+        result = await service.get_package_by_id(package_id, user_id=user_id)
+        
+        # Assertions
+        assert result["EC"] == 0
+        assert result["package"]["is_favorite"] is False
+    
+    logger.info("✓ Test get package by ID with favorite status passed")
+
+
+@pytest.mark.asyncio
+async def test_search_packages_with_favorite_status(tour_service):
+    """Test search_packages includes is_favorite field"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    package_id = str(uuid4())
+    
+    sample_package = {
+        "package_id": package_id,
+        "package_name": "Tour Đà Lạt",
+        "destination": "Đà Lạt",
+        "price": 2500000.0
+    }
+    
+    # Mock search service
+    with patch('app.v1.services.tour_package_service.tour_package_search_service') as mock_search:
+        mock_search.search_tour_packages = AsyncMock(return_value=[sample_package])
+        
+        # Patch _add_favorite_status
+        with patch.object(service, '_add_favorite_status', return_value=[{**sample_package, "is_favorite": True}]):
+            # Execute
+            result = await service.search_packages(
+                user_message="tour Đà Lạt",
+                user_id=user_id
+            )
+            
+            # Assertions
+            assert result["EC"] == 0
+            assert len(result["packages"]) == 1
+            assert result["packages"][0]["is_favorite"] is True
+    
+    logger.info("✓ Test search packages with favorite status passed")
+
+
+@pytest.mark.asyncio
+async def test_recommend_packages_with_favorite_status(tour_service):
+    """Test recommend_packages includes is_favorite field"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    package_id = str(uuid4())
+    
+    sample_package = {
+        "package_id": package_id,
+        "package_name": "Tour Recommended",
+        "destination": "Đà Lạt",
+        "price": 2500000.0,
+        "end_date": "2024-12-31"
+    }
+    
+    # Mock admin settings
+    with patch.object(service, 'get_admin_setting', return_value=False):
+        # Mock expiring tours query
+        mock_execute = Mock()
+        mock_execute.data = [sample_package]
+        mock_table.select.return_value.eq.return_value.gt.return_value.gte.return_value.order.return_value.limit.return_value.execute.return_value = mock_execute
+        
+        # Mock search service
+        with patch('app.v1.services.tour_package_service.tour_package_search_service') as mock_search:
+            mock_search.search_tour_packages = AsyncMock(return_value=[sample_package])
+            
+            # Mock mem0 client
+            with patch('app.v1.services.tour_package_service.mem0_client', None):
+                # Patch _add_favorite_status
+                with patch.object(service, '_add_favorite_status', return_value=[{**sample_package, "is_favorite": True}]):
+                    # Execute
+                    result = await service.recommend_packages(user_id=user_id, k=1)
+                    
+                    # Assertions
+                    assert result["EC"] == 0
+                    assert len(result["packages"]) == 1
+                    assert result["packages"][0]["is_favorite"] is True
+    
+    logger.info("✓ Test recommend packages with favorite status passed")
+
+
+@pytest.mark.asyncio
+async def test_filter_packages_by_month_with_favorite_status(tour_service, sample_tour_response):
+    """Test filter_packages_by_month includes is_favorite field"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    
+    # Mock filter response
+    mock_execute = Mock()
+    mock_execute.data = [sample_tour_response]
+    
+    mock_query = Mock()
+    mock_query.gte.return_value = mock_query
+    mock_query.lt.return_value = mock_query
+    mock_query.eq.return_value = mock_query
+    mock_query.order.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.offset.return_value = mock_query
+    mock_query.execute.return_value = mock_execute
+    mock_table.select.return_value = mock_query
+    
+    # Patch _add_favorite_status
+    with patch.object(service, '_add_favorite_status', return_value=[{**sample_tour_response, "is_favorite": False}]):
+        # Execute
+        result = await service.filter_packages_by_month(
+            month=12,
+            year=2024,
+            user_id=user_id
+        )
+        
+        # Assertions
+        assert result["EC"] == 0
+        assert len(result["packages"]) == 1
+        assert result["packages"][0]["is_favorite"] is False
+    
+    logger.info("✓ Test filter by month with favorite status passed")
+
+
+@pytest.mark.asyncio
+async def test_get_all_packages_without_user_id(tour_service, sample_tour_response):
+    """Test get_all_packages sets is_favorite=False when user_id is None"""
+    service, mock_table = tour_service
+    
+    # Mock get packages response
+    mock_execute = Mock()
+    mock_execute.data = [sample_tour_response]
+    mock_table.select.return_value.order.return_value.execute.return_value = mock_execute
+    
+    # Patch _add_favorite_status to verify it's called with None
+    with patch.object(service, '_add_favorite_status', return_value=[{**sample_tour_response, "is_favorite": False}]) as mock_add:
+        # Execute without user_id
+        result = await service.get_all_packages(user_id=None)
+        
+        # Assertions
+        assert result["EC"] == 0
+        assert len(result["packages"]) == 1
+        assert result["packages"][0]["is_favorite"] is False
+        # Verify _add_favorite_status was called with None
+        mock_add.assert_called_once()
+        call_args = mock_add.call_args[0]
+        assert call_args[1] is None  # user_id should be None
+    
+    logger.info("✓ Test get all packages without user_id passed")
+
+
+@pytest.mark.asyncio
+async def test_add_favorite_status_with_invalid_package_ids(tour_service):
+    """Test _add_favorite_status handles packages with missing package_id"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    
+    packages = [
+        {"package_name": "Tour 1"},  # Missing package_id
+        {"package_id": str(uuid4()), "package_name": "Tour 2"}
+    ]
+    
+    # Mock favorites query
+    mock_favorites_execute = Mock()
+    mock_favorites_execute.data = []
+    mock_table.select.return_value.eq.return_value.in_.return_value.execute.return_value = mock_favorites_execute
+    
+    # Execute
+    result = await service._add_favorite_status(packages, user_id)
+    
+    # Assertions
+    assert len(result) == 2
+    assert result[0]["is_favorite"] is False  # Missing package_id
+    assert result[1]["is_favorite"] is False  # Not favorited
+    
+    logger.info("✓ Test add favorite status with invalid package IDs passed")
+
+
+@pytest.mark.asyncio
+async def test_add_favorite_status_partial_favorites(tour_service):
+    """Test _add_favorite_status with mix of favorited and non-favorited packages"""
+    service, mock_table = tour_service
+    
+    user_id = str(uuid4())
+    favorited_id = str(uuid4())
+    not_favorited_id = str(uuid4())
+    
+    packages = [
+        {"package_id": favorited_id, "package_name": "Tour 1"},
+        {"package_id": not_favorited_id, "package_name": "Tour 2"},
+        {"package_id": favorited_id, "package_name": "Tour 3"}  # Duplicate ID
+    ]
+    
+    # Mock favorites query - only favorited_id is favorited
+    mock_favorites_execute = Mock()
+    mock_favorites_execute.data = [{"package_id": favorited_id}]
+    mock_table.select.return_value.eq.return_value.in_.return_value.execute.return_value = mock_favorites_execute
+    
+    # Execute
+    result = await service._add_favorite_status(packages, user_id)
+    
+    # Assertions
+    assert len(result) == 3
+    assert result[0]["is_favorite"] is True  # favorited
+    assert result[1]["is_favorite"] is False  # not favorited
+    assert result[2]["is_favorite"] is True  # favorited (duplicate)
+    
+    logger.info("✓ Test add favorite status partial favorites passed")
+
+
 # ==================== Run Tests Summary ====================
 
 if __name__ == "__main__":
