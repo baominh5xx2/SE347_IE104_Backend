@@ -16,6 +16,7 @@ from ...schema.payment_schema import (
     VNPayIPNResponse,
     AdminPaymentCreate,
     AdminPaymentCreateResponse,
+    AdminConfirmCashPayment,
     AdminPaymentRefund,
     AdminPaymentRefundResponse,
     AdminPaymentListResponse
@@ -356,6 +357,75 @@ async def create_payment_by_admin(
         raise
     except Exception as e:
         logger.error(f"Error in create_payment_by_admin endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/confirm-cash", response_model=AdminPaymentCreateResponse)
+async def confirm_cash_payment_by_admin(
+    payment: AdminConfirmCashPayment,
+    current_admin: dict = Depends(get_current_admin),
+    service: PaymentService = Depends(get_payment_service)
+):
+    """
+    Admin xác nhận khách hàng đã thanh toán tiền mặt cho booking
+    
+    **Flow:**
+    1. Admin tạo booking → OTP được gửi
+    2. User/Admin verify OTP → Booking status = "pending"
+    3. Admin gọi API này để xác nhận thanh toán tiền mặt
+    4. Payment được tạo với payment_method="cash", status="completed"
+    5. Booking status được cập nhật thành "confirmed"
+    6. Doanh thu tự động được tính từ bookings confirmed có payment completed
+    
+    **REQUIRE ADMIN AUTHENTICATION**
+    
+    **Điều kiện:**
+    - Booking phải có status = "pending" (sau khi verify OTP)
+    - Booking chưa có payment completed
+    
+    Args:
+        payment: AdminConfirmCashPayment với booking_id và notes (optional)
+        current_admin: Admin info từ authentication
+        service: Payment service instance
+        
+    Returns:
+        AdminPaymentCreateResponse với thông tin payment đã tạo
+        
+    Example:
+        POST /api/v1/payments/admin/confirm-cash
+        Body: {
+            "booking_id": "uuid",
+            "notes": "Khách thanh toán tiền mặt tại quầy"
+        }
+    """
+    try:
+        admin_id = current_admin.get("user_id")
+        
+        result = await service.confirm_cash_payment_by_admin(
+            booking_id=str(payment.booking_id),
+            admin_id=admin_id,
+            notes=payment.notes
+        )
+        
+        if result["EC"] != 0:
+            status_codes = {
+                1: 404,  # Booking not found
+                2: 400,  # Invalid booking status (not pending)
+                3: 409,  # Payment already exists
+                4: 500,  # Failed to create
+                5: 500   # Error
+            }
+            raise HTTPException(
+                status_code=status_codes.get(result["EC"], 400),
+                detail=result["EM"]
+            )
+        
+        return AdminPaymentCreateResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in confirm_cash_payment_by_admin endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

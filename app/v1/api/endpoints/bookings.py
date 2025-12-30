@@ -15,13 +15,14 @@ from ...schema.booking_schema import (
     BookingCancelRequest,
     BookingCancelResponse,
     BookingCreateWithOTP,
+    AdminBookingCreate,
     VerifyOTPRequest,
     BookingOTPResponse,
     ResendOTPRequest
 )
 from ...services.booking_service import BookingService
 from ...core.supabase import get_supabase_client
-from ...core.dependencies import get_current_user
+from ...core.dependencies import get_current_user, get_current_admin
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,82 @@ async def create_booking_with_otp(
         raise
     except Exception as e:
         logger.error(f"Error in create_booking_with_otp endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/create", response_model=BookingOTPResponse, status_code=201)
+async def create_booking_by_admin(
+    booking: AdminBookingCreate,
+    current_admin: dict = Depends(get_current_admin),
+    service: BookingService = Depends(get_booking_service)
+):
+    """
+    Admin tạo booking cho khách hàng (bỏ qua OTP, status = pending)
+    
+    **REQUIRE ADMIN AUTHENTICATION**
+    
+    Flow:
+    1. Validate package & check slots
+    2. Create booking với status="pending" (không cần OTP)
+    3. Update package slots
+    4. Return booking_id với status="pending"
+    
+    Khác với /create-with-otp:
+    - Không cần OTP verification
+    - Status = "pending" ngay (thay vì "otp_sent")
+    - Email là optional (không bắt buộc)
+    - Yêu cầu admin authentication
+    
+    Args:
+        booking: AdminBookingCreate với booking data
+        current_admin: Admin info từ authentication
+        service: Booking service instance
+    
+    Returns:
+        BookingOTPResponse với booking_id và status="pending"
+        
+    Example:
+        POST /api/v1/bookings/admin/create
+        Authorization: Bearer <admin-token>
+        Body: {
+            "package_id": "uuid",
+            "number_of_people": 2,
+            "contact_name": "Nguyen Van A",
+            "contact_phone": "0901234567",
+            "contact_email": "user@example.com",  // optional
+            "special_requests": "Phòng view đẹp",
+            "user_id": "uuid"
+        }
+    """
+    try:
+        booking_data = booking.model_dump()
+        admin_id = current_admin.get("user_id")
+        
+        # Validate user_id is provided
+        if not booking_data.get('user_id'):
+            raise HTTPException(status_code=400, detail="user_id is required")
+        
+        result = await service.create_booking_by_admin(booking_data, admin_id)
+        
+        if result["EC"] != 0:
+            status_codes = {
+                1: 404,  # Package not found
+                2: 400,  # Package not active
+                3: 400,  # Not enough slots
+                4: 500,  # Failed to create
+                6: 500   # Error
+            }
+            raise HTTPException(
+                status_code=status_codes.get(result["EC"], 400),
+                detail=result["EM"]
+            )
+        
+        return BookingOTPResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in create_booking_by_admin endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

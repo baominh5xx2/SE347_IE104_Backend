@@ -127,6 +127,21 @@ class AdminPaymentCreate(BaseModel):
     )
 
 
+class AdminConfirmCashPayment(BaseModel):
+    """Schema for admin confirming cash payment"""
+    booking_id: UUID = Field(..., description="ID của booking cần xác nhận thanh toán tiền mặt")
+    notes: Optional[str] = Field(None, description="Ghi chú của admin (optional)")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "booking_id": "07e8c89e-90d4-4ebc-9302-384dc6cb2f0c",
+                "notes": "Khách thanh toán tiền mặt tại quầy"
+            }
+        }
+    )
+
+
 class AdminPaymentRefund(BaseModel):
     """Schema for admin payment refund"""
     refund_reason: str = Field(..., description="Lý do hoàn tiền")

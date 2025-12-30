@@ -633,6 +633,149 @@ class PaymentService:
                 "data": None
             }
     
+    async def confirm_cash_payment_by_admin(
+        self,
+        booking_id: str,
+        admin_id: str,
+        notes: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Admin xác nhận khách hàng đã thanh toán tiền mặt cho booking
+        
+        Flow:
+        1. Kiểm tra booking tồn tại và có status "pending" (sau khi verify OTP)
+        2. Kiểm tra chưa có payment completed
+        3. Tạo payment với payment_method="cash", status="completed"
+        4. Cập nhật booking status thành "confirmed"
+        5. Doanh thu tự động được tính từ bookings confirmed có payment completed
+        
+        Args:
+            booking_id: ID của booking cần xác nhận thanh toán
+            admin_id: ID của admin xác nhận
+            notes: Ghi chú của admin (optional)
+            
+        Returns:
+            Dict with EC, EM, data
+        """
+        try:
+            # 1. Kiểm tra booking tồn tại và lấy thông tin
+            booking_result = self.supabase.table('bookings')\
+                .select('booking_id, total_amount, status, user_id')\
+                .eq('booking_id', booking_id)\
+                .execute()
+            
+            if not booking_result.data:
+                return {
+                    "EC": 1,
+                    "EM": "Booking not found",
+                    "data": None
+                }
+            
+            booking = booking_result.data[0]
+            
+            # 2. Validate booking status - chỉ cho phép booking có status "pending" (sau khi verify OTP)
+            if booking['status'] != 'pending':
+                return {
+                    "EC": 2,
+                    "EM": f"Chỉ có thể xác nhận thanh toán cho booking có status 'pending'. Booking hiện tại có status '{booking['status']}'",
+                    "data": None
+                }
+            
+            # 3. Kiểm tra đã có payment chưa (bất kỳ status)
+            existing_payment = self.supabase.table('payments')\
+                .select('payment_id, payment_status, payment_method')\
+                .eq('booking_id', booking_id)\
+                .execute()
+            
+            now = datetime.now(timezone.utc).isoformat()
+            
+            if existing_payment.data:
+                payment = existing_payment.data[0]
+                
+                # Nếu đã có payment completed → Báo lỗi
+                if payment['payment_status'] == 'completed':
+                    return {
+                        "EC": 3,
+                        "EM": "Booking này đã có payment completed. Không thể tạo payment mới.",
+                        "data": None
+                    }
+                
+                # Nếu có payment pending/failed → Update thành completed với cash method
+                update_data = {
+                    "payment_method": "cash",
+                    "payment_status": "completed",
+                    "paid_at": now,
+                    "created_by_admin_id": admin_id,
+                    "transaction_id": None  # Tiền mặt không có transaction_id
+                }
+                
+                payment_result = self.supabase.table('payments')\
+                    .update(update_data)\
+                    .eq('payment_id', payment['payment_id'])\
+                    .execute()
+                
+                if not payment_result.data:
+                    return {
+                        "EC": 4,
+                        "EM": "Failed to update payment",
+                        "data": None
+                    }
+                
+                # Lấy payment đã update
+                updated_payment = payment_result.data[0]
+                
+            else:
+                # 4. Chưa có payment → Tạo mới với payment_method="cash", status="completed"
+                payment_data = {
+                    "booking_id": booking_id,
+                    "amount": booking['total_amount'],
+                    "payment_method": "cash",  # Mặc định là tiền mặt
+                    "payment_status": "completed",
+                    "transaction_id": None,  # Tiền mặt không có transaction_id
+                    "paid_at": now,
+                    "created_by_admin_id": admin_id,
+                    "created_at": now
+                }
+                
+                payment_result = self.supabase.table('payments')\
+                    .insert(payment_data)\
+                    .execute()
+                
+                if not payment_result.data:
+                    return {
+                        "EC": 4,
+                        "EM": "Failed to create payment",
+                        "data": None
+                    }
+                
+                updated_payment = payment_result.data[0]
+            
+            # 5. Cập nhật booking status thành "confirmed"
+            self.supabase.table('bookings')\
+                .update({"status": "confirmed"})\
+                .eq('booking_id', booking_id)\
+                .execute()
+            
+            # Log với notes nếu có
+            log_message = f"Admin {admin_id} confirmed cash payment for booking {booking_id}. Amount: {booking['total_amount']}"
+            if notes:
+                log_message += f" Notes: {notes}"
+            logger.info(log_message)
+            
+            return {
+                "EC": 0,
+                "EM": "Đã xác nhận thanh toán tiền mặt thành công. Booking đã được xác nhận.",
+                "data": updated_payment
+            }
+            
+        except Exception as e:
+            logger.error(f"Error confirming cash payment by admin: {str(e)}")
+            return {
+                "EC": 5,
+                "EM": f"Error: {str(e)}",
+                "data": None
+            }
+    
     async def refund_payment_by_admin(
         self,
         payment_id: str,
