@@ -762,9 +762,30 @@ class BookingService:
                 .eq('package_id', str(booking_data['package_id'])) \
                 .execute()
             
+            # 5. Tự động tạo payment với status "pending" và payment_method="cash"
+            payment_data = {
+                "booking_id": booking_id,
+                "amount": total_amount,
+                "payment_method": "cash",
+                "payment_status": "pending",  # Chờ thanh toán
+                "transaction_id": None,
+                "created_by_admin_id": admin_id,
+                "created_at": now
+            }
+            
+            try:
+                payment_result = self.supabase.table('payments').insert(payment_data).execute()
+                if payment_result.data:
+                    logger.info(f"Auto-created pending payment for booking {booking_id} (cash method)")
+                else:
+                    logger.warning(f"Failed to auto-create payment for booking {booking_id}, but booking created")
+            except Exception as e:
+                # Nếu tạo payment thất bại, vẫn tiếp tục (booking đã tạo thành công)
+                logger.error(f"Error auto-creating payment for booking {booking_id}: {str(e)}")
+            
             logger.info(f"Admin {admin_id} created booking {booking_id} with status pending (no OTP)")
             
-            # 5. Return response
+            # 6. Return response
             return {
                 "EC": 0,
                 "EM": "Đã tạo booking thành công. Booking đang ở trạng thái pending, chờ thanh toán.",

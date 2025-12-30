@@ -348,7 +348,7 @@ async def create_booking_by_admin(
                 2: 400,  # Package not active
                 3: 400,  # Not enough slots
                 4: 500,  # Failed to create
-                6: 500   # Error
+                5: 500   # Error
             }
             raise HTTPException(
                 status_code=status_codes.get(result["EC"], 400),
