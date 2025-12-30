@@ -277,6 +277,31 @@ class VerifyOTPRequest(BaseModel):
     )
 
 
+class AdminBookingCreate(BaseModel):
+    """Schema for admin creating booking without OTP (status = pending)"""
+    package_id: UUID = Field(..., description="ID của tour package")
+    number_of_people: int = Field(..., ge=1, description="Số lượng người (tối thiểu 1)")
+    contact_name: str = Field(..., min_length=2, max_length=100, description="Tên người liên hệ")
+    contact_phone: str = Field(..., min_length=10, max_length=20, description="Số điện thoại liên hệ")
+    contact_email: Optional[str] = Field(None, description="Email liên hệ (optional, không cần cho OTP)")
+    special_requests: Optional[str] = Field(None, max_length=500, description="Yêu cầu đặc biệt")
+    user_id: UUID = Field(..., description="ID của người dùng đặt tour (bắt buộc)")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "package_id": "07e8c89e-90d4-4ebc-9302-384dc6cb2f0c",
+                "number_of_people": 2,
+                "contact_name": "Nguyen Van A",
+                "contact_phone": "0901234567",
+                "contact_email": "user@example.com",
+                "special_requests": "Phòng view đẹp",
+                "user_id": "abfdf6b6-b58a-4cb7-9703-a7641454fd94"
+            }
+        }
+    )
+
+
 class BookingOTPResponse(BaseModel):
     """Response schema for OTP booking operations"""
     EC: int = Field(..., description="Error code (0 = success)")

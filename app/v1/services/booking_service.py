@@ -677,6 +677,115 @@ class BookingService:
                 "data": None
             }
     
+    async def create_booking_by_admin(self, booking_data: Dict[str, Any], admin_id: str) -> Dict[str, Any]:
+        """
+        Admin tạo booking cho khách hàng (bỏ qua OTP, status = pending)
+        
+        Flow:
+        1. Validate package & check slots
+        2. Create booking với status="pending" (không cần OTP)
+        3. Update package slots
+        4. Return booking_id
+        
+        Args:
+            booking_data: Dictionary containing booking information
+            admin_id: ID của admin tạo booking
+            
+        Returns:
+            Dict with EC, EM, and data (includes booking_id, status="pending")
+        """
+        try:
+            # 1. Verify package exists, has available slots, and get price
+            package_result = self.supabase.table('tour_packages') \
+                .select('available_slots, is_active, price, package_name') \
+                .eq('package_id', str(booking_data['package_id'])) \
+                .execute()
+            
+            if not package_result.data:
+                return {
+                    "EC": 1,
+                    "EM": "Tour package not found",
+                    "data": None
+                }
+            
+            package = package_result.data[0]
+            
+            if not package['is_active']:
+                return {
+                    "EC": 2,
+                    "EM": "Tour package is not active",
+                    "data": None
+                }
+            
+            if package['available_slots'] < booking_data['number_of_people']:
+                return {
+                    "EC": 3,
+                    "EM": f"Not enough slots available. Only {package['available_slots']} slots left",
+                    "data": None
+                }
+            
+            # 2. Calculate amount
+            total_amount = package['price'] * booking_data['number_of_people']
+            
+            # 3. Create booking with status "pending" (không cần OTP)
+            now = datetime.now(timezone.utc).isoformat()
+            booking_insert = {
+                "package_id": str(booking_data['package_id']),
+                "number_of_people": booking_data['number_of_people'],
+                "total_amount": total_amount,
+                "contact_name": booking_data['contact_name'],
+                "contact_phone": booking_data.get('contact_phone'),
+                "contact_email": booking_data.get('contact_email'),  # Optional
+                "special_requests": booking_data.get('special_requests'),
+                "user_id": str(booking_data['user_id']),
+                "status": "pending",  # Status pending ngay, không cần OTP
+                "created_at": now,
+                "updated_at": now
+            }
+            
+            result = self.supabase.table('bookings').insert(booking_insert).execute()
+            
+            if not result.data:
+                return {
+                    "EC": 4,
+                    "EM": "Failed to create booking",
+                    "data": None
+                }
+            
+            booking = result.data[0]
+            booking_id = booking['booking_id']
+            
+            # 4. Update package slots
+            new_slots = package['available_slots'] - booking_data['number_of_people']
+            self.supabase.table('tour_packages') \
+                .update({"available_slots": new_slots}) \
+                .eq('package_id', str(booking_data['package_id'])) \
+                .execute()
+            
+            logger.info(f"Admin {admin_id} created booking {booking_id} with status pending (no OTP)")
+            
+            # 5. Return response
+            return {
+                "EC": 0,
+                "EM": "Đã tạo booking thành công. Booking đang ở trạng thái pending, chờ thanh toán.",
+                "data": {
+                    "booking_id": booking_id,
+                    "status": "pending",
+                    "total_amount": total_amount,
+                    "contact_name": booking_data['contact_name'],
+                    "contact_phone": booking_data.get('contact_phone'),
+                    "contact_email": booking_data.get('contact_email')
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating booking by admin: {str(e)}")
+            return {
+                "EC": 6,
+                "EM": f"Error creating booking: {str(e)}",
+                "data": None
+            }
+    
     async def verify_otp(self, booking_id: str, otp_code: str) -> Dict[str, Any]:
         """
         Verify OTP and confirm booking (copy logic from MCP chatbot)
