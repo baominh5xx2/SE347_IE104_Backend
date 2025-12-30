@@ -8,7 +8,7 @@ from typing import Optional
 
 class CreateBookingInput(BaseModel):
     """Input schema for create_booking tool"""
-    user_phone: str = Field(..., description="User phone number (Vietnamese format, e.g., '0901234567'), you must ask user for this information")
+    user_phone: str = Field(..., min_length=10, max_length=10, description="User phone number (Vietnamese format, exactly 10 digits, e.g., '0901234567'), you must ask user for this information")
     user_email: str = Field(
         ...,
         pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
@@ -24,6 +24,17 @@ class CreateBookingInput(BaseModel):
     number_of_people: int = Field(..., ge=1, le=50, description="Number of people (1-50), you must ask user for this information")
     special_requests: Optional[str] = Field(default="", description="Special requests or dietary restrictions, you must ask user for this information")
     user_id: Optional[str] = Field(None, description="User ID if available (for authenticated users)")
+
+    @validator("user_phone")
+    def validate_phone_number(cls, v: str) -> str:
+        """
+        Validate phone number must be exactly 10 digits.
+        """
+        # Remove any non-digit characters
+        digits_only = ''.join(filter(str.isdigit, v))
+        if len(digits_only) != 10:
+            raise ValueError("Số điện thoại phải có đúng 10 số")
+        return digits_only
 
     @validator("user_email")
     def validate_real_email(cls, v: str) -> str:

@@ -1,0 +1,21 @@
+{
+  "ignore": [
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/__pycache__/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/.git/**",
+    "**/*.log",
+    "**/*.zip",
+    "**/*.bin",
+    "**/*.sqlite",
+    "**/*.parquet"
+  ],
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://ai.megallm.io",
+    "ANTHROPIC_API_KEY": "sk-mega-e00f1134108b0c3e2455d1130def60dfcf1de92165a1b29518d3b8f5d948bd0f"
+  }
+}

@@ -41,6 +41,7 @@ def get_booking_management_service():
     return BookingManagementService(supabase)
 
 
+@router.get("", response_model=ReviewListResponse)
 @router.get("/", response_model=ReviewListResponse)
 async def get_reviews(
     package_id: Optional[str] = Query(None, description="Lọc theo package ID"),

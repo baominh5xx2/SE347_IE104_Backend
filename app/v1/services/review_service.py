@@ -46,9 +46,11 @@ class ReviewService:
             Dict with EC, EM, data, and total
         """
         try:
-            # Select reviews with tour_packages info via JOIN through bookings
+            # Select reviews with tour_packages info via JOIN through bookings and users
             query = self.supabase.table('reviews').select(
-                'review_id, booking_id, user_id, package_id, rating, comment, is_approved, created_at, updated_at, bookings(package_id, tour_packages(package_id, package_name, destination, price))',
+                'review_id, booking_id, user_id, package_id, rating, comment, is_approved, created_at, updated_at, '
+                'users(full_name, email, profile_picture), '
+                'bookings(package_id, tour_packages(package_id, package_name, destination, price))',
                 count='exact'
             )
             
@@ -73,9 +75,16 @@ class ReviewService:
             
             result = query.execute()
             
-            # Flatten nested bookings.tour_packages data
+            # Flatten nested bookings.tour_packages and users data
             flattened_data = []
             for review in (result.data or []):
+                # Get users data - Supabase returns as object for one-to-one relationship
+                user_data = review.get('users', {})
+                if isinstance(user_data, list) and user_data:
+                    user_data = user_data[0]
+                elif not isinstance(user_data, dict):
+                    user_data = {}
+                
                 # Get bookings data
                 booking_data = review.get('bookings')
                 if isinstance(booking_data, list) and booking_data:
@@ -90,6 +99,7 @@ class ReviewService:
                 elif not isinstance(package_data, dict):
                     package_data = {}
                 
+                # Build flattened review with all user and package metadata
                 flattened_review = {
                     "review_id": review.get('review_id'),
                     "booking_id": review.get('booking_id'),
@@ -100,6 +110,12 @@ class ReviewService:
                     "is_approved": review.get('is_approved'),
                     "created_at": review.get('created_at'),
                     "updated_at": review.get('updated_at'),
+                    # User metadata - ensure these are always included
+                    "user_full_name": user_data.get('full_name') if user_data else None,
+                    "user_email": user_data.get('email') if user_data else None,
+                    "user_profile_picture": user_data.get('profile_picture') if user_data else None,
+                    # Package metadata - extract package name
+                    "package_name": package_data.get('package_name') if package_data else None,
                     "package": package_data if package_data else None
                 }
                 flattened_data.append(flattened_review)
@@ -170,7 +186,7 @@ class ReviewService:
         try:
             # Get review with joined user and package info
             result = self.supabase.table('reviews') \
-                .select('review_id, booking_id, user_id, package_id, rating, comment, is_approved, created_at, updated_at, users(full_name, email), tour_packages(package_name, destination)') \
+                .select('review_id, booking_id, user_id, package_id, rating, comment, is_approved, created_at, updated_at, users(full_name, email, profile_picture), tour_packages(package_name, destination)') \
                 .eq('review_id', review_id) \
                 .execute()
             
@@ -209,6 +225,7 @@ class ReviewService:
                 "updated_at": review.get('updated_at'),
                 "user_full_name": user_data.get('full_name'),
                 "user_email": user_data.get('email'),
+                "user_profile_picture": user_data.get('profile_picture'),
                 "package_name": package_data.get('package_name'),
                 "destination": package_data.get('destination')
             }
