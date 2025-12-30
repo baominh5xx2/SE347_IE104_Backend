@@ -42,6 +42,13 @@ async def _create_booking_impl(
     Implementation of create_booking tool.
     """
     logger.info(f"Creating booking: phone={user_phone}, pkg={package_id}, user_id={user_id}")
+    
+    # Validate phone number: must be exactly 10 digits
+    phone_digits = ''.join(filter(str.isdigit, user_phone))
+    if len(phone_digits) != 10:
+        return {"success": False, "error": "Số điện thoại phải có đúng 10 số"}
+    user_phone = phone_digits  # Use cleaned phone number
+    
     try:
         supabase = get_supabase_client()
         

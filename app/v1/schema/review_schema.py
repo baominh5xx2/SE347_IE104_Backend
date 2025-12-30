@@ -65,6 +65,8 @@ class ReviewWithUserInfo(ReviewResponse):
     """Review response with user information"""
     user_full_name: Optional[str] = Field(None, description="Tên đầy đủ của user")
     user_email: Optional[str] = Field(None, description="Email của user")
+    user_profile_picture: Optional[str] = Field(None, description="Ảnh đại diện của user")
+    package_name: Optional[str] = Field(None, description="Tên tour package")
 
 
 class ReviewWithPackageInfo(ReviewResponse):
@@ -77,6 +79,7 @@ class ReviewDetailResponse(ReviewResponse):
     """Review response with full details"""
     user_full_name: Optional[str] = Field(None, description="Tên đầy đủ của user")
     user_email: Optional[str] = Field(None, description="Email của user")
+    user_profile_picture: Optional[str] = Field(None, description="Ảnh đại diện của user")
     package_name: Optional[str] = Field(None, description="Tên tour package")
     destination: Optional[str] = Field(None, description="Điểm đến")
 
@@ -85,7 +88,7 @@ class ReviewListResponse(BaseModel):
     """Response schema for list of reviews"""
     EC: int = Field(..., description="Error code (0 = success)")
     EM: str = Field(..., description="Error message")
-    data: Optional[list[ReviewResponse]] = None
+    data: Optional[list[ReviewWithUserInfo]] = None
     total: Optional[int] = None
 
 
